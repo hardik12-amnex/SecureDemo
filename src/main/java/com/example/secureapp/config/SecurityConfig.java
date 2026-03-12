@@ -90,6 +90,11 @@ public class SecurityConfig {
             .sessionManagement(session -> session
                 // Create session only when required (don't create unnecessarily)
                 .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
+                // Session Fixation Protection: after authentication, the existing
+                // session ID is changed (Servlet 3.1+ changeSessionId) so that an
+                // attacker who knew the pre-login session ID can no longer hijack it.
+                // Flow: oldSessionId → invalidated, newSessionId → generated
+                .sessionFixation(fix -> fix.changeSessionId())
                 // Limit to 1 concurrent session per user
                 .maximumSessions(1)
                 // Don't prevent login, allow new login to replace old session
