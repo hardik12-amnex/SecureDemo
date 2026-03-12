@@ -1,0 +1,78 @@
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+.flattened-pom.xml
+*.pom.xml
+dist/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+.Thumbs.db
+
+# Application
+logs/
+*.log
+application-local.properties
+application-dev.properties
+application-prod.properties
+
+# Database
+*.db
+*.sqlite
+
+# Redis
+dump.rdb
+
+# Compiled Java
+*.class
+*.jar
+*.jar.original
+*.jar.asc
+*.zip
+
+# Package Files
+*.rar
+*.7z
+*.tar
+*.gz
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build
+build/
+.gradle/
+gradlew
+gradlew.bat
+
+# Testing
+.coverage
+coverage/
+junit-results.xml
+
+# Misc
+*.md.bak
+.DS_Store
+.AppleDouble
+.LSOverride
