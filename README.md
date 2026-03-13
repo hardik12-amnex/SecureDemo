@@ -1,544 +1,589 @@
-# SecureApp - Production-Grade Spring Boot Backend
+# SecureApp — Enterprise-Grade Spring Boot Security Backend
 
-A enterprise-level Spring Boot 4.0.3 application with comprehensive security features, session management, and role-based access control.
+**Version:** 1.0.0  
+**Java:** 21  
+**Spring Boot:** 4.0.3  
+**Last Updated:** March 12, 2026
 
-## Project Overview
+---
 
-**SecureApp** is a production-ready backend application built with Spring Boot, featuring:
+## Table of Contents
 
-- **Authentication & Authorization**: Session-based authentication with server-side sessions stored in PostgreSQL (JDBC)
-- **Security Hardening**: CSRF protection, secure headers, CORS configuration for Angular frontends
-- **Database**: PostgreSQL integration with JPA/Hibernate ORM
-- **Session Management**: Spring Session JDBC for database-backed distributed session handling
-- **Input Validation**: Jakarta Bean Validation with comprehensive error handling
-- **API Standards**: RESTful APIs with standardized response format
-- **Role-Based Access Control**: Fine-grained authorization using Spring Security
+1. [Overview](#overview)
+2. [Technology Stack](#technology-stack)
+3. [Architecture](#architecture)
+4. [Project Structure](#project-structure)
+5. [Security Features](#security-features)
+6. [DPoP (Demonstration of Proof-of-Possession)](#dpop-demonstration-of-proof-of-possession)
+7. [Request Flow](#request-flow)
+8. [API Reference](#api-reference)
+9. [Role-Based Access Control](#role-based-access-control)
+10. [Database Setup](#database-setup)
+11. [Configuration](#configuration)
+12. [Running the Application](#running-the-application)
+13. [Default Test Credentials](#default-test-credentials)
+
+---
+
+## Overview
+
+SecureApp is a production-grade Spring Boot backend demonstrating enterprise security best practices. It implements **session-based authentication** with **DPoP (Demonstration of Proof-of-Possession)** binding, **JDBC-backed sessions**, **CSRF protection**, **role-based access control**, and comprehensive **security headers**.
+
+DPoP ensures that even if a session cookie is stolen, the attacker cannot use it without possessing the client's private cryptographic key.
+
+---
 
 ## Technology Stack
 
-| Component | Technology | Version |
-|-----------|-----------|---------|
-| **Runtime** | Java | 21 |
-| **Framework** | Spring Boot | 4.0.3 |
-| **Security** | Spring Security | Latest |
-| **Database** | PostgreSQL | 42.7.3 |
-| **Session Store** | Spring Session JDBC | Latest |
-| **ORM** | Spring Data JPA/Hibernate | Latest |
-| **Validation** | Jakarta Bean Validation | Latest |
-| **Build Tool** | Maven | 3.9.12+ |
-| **Annotations** | Lombok | Latest |
+| Component             | Technology                          |
+|-----------------------|-------------------------------------|
+| Language              | Java 21                             |
+| Framework             | Spring Boot 4.0.3                   |
+| Security              | Spring Security 7.x                 |
+| Session Store         | Spring Session JDBC (PostgreSQL)    |
+| Database              | PostgreSQL                          |
+| DPoP Proof Validation | Nimbus JOSE JWT 10.0.2              |
+| Replay Protection     | Caffeine Cache (in-memory)          |
+| Build Tool            | Maven                               |
+| Code Generation       | Lombok                              |
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        CLIENT (Browser / Angular)                   │
+│  1. Generate ECDSA P-256 keypair (WebCrypto)                       │
+│  2. Build DPoP proof JWT (self-signed with private key)             │
+│  3. Send request with DPoP header + session cookie                  │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                      SPRING SECURITY FILTER CHAIN                    │
+│                                                                      │
+│  ┌──────────────────────────┐                                        │
+│  │ DPoPAuthenticationFilter │ ← Validates DPoP proof JWT             │
+│  │  • Parse & verify JWT     │   Checks JWK thumbprint vs session    │
+│  │  • Replay protection (jti)│   Returns 401 if mismatch             │
+│  └───────────┬──────────────┘                                        │
+│              ▼                                                       │
+│  ┌──────────────────────────┐                                        │
+│  │ SessionValidationFilter  │ ← Validates session existence          │
+│  │  • Session exists?        │   Checks expiry, authentication       │
+│  │  • Session expired?       │   Returns 401 if invalid              │
+│  │  • User authenticated?    │                                       │
+│  └───────────┬──────────────┘                                        │
+│              ▼                                                       │
+│  ┌──────────────────────────┐                                        │
+│  │ SecurityHeadersFilter    │ ← Adds CSP, HSTS, X-Frame-Options     │
+│  └───────────┬──────────────┘                                        │
+│              ▼                                                       │
+│  ┌──────────────────────────┐                                        │
+│  │ CSRF Filter (Spring)     │ ← CookieCsrfTokenRepository           │
+│  └───────────┬──────────────┘                                        │
+└──────────────┼───────────────────────────────────────────────────────┘
+               ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                     SPRING MVC INTERCEPTOR CHAIN                     │
+│                                                                      │
+│  ┌──────────────────────────┐                                        │
+│  │ AuthorizationInterceptor │ ← Role-based path authorization        │
+│  │  • /admin/** → ROLE_ADMIN │   Uses RolePermissionMapping           │
+│  │  • /dashboard/** → USER+  │   Returns 403 if denied               │
+│  └───────────┬──────────────┘                                        │
+└──────────────┼───────────────────────────────────────────────────────┘
+               ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                          CONTROLLERS                                 │
+│  AuthController    → /auth/login, /auth/register, /auth/logout,      │
+│                      /auth/me                                        │
+│  DashboardController → /health, /dashboard, /admin/users             │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+---
 
 ## Project Structure
 
 ```
-SecureDemo/
-├── pom.xml                                    # Maven configuration
-├── init-database.sql                          # Database schema + seed data
-├── SecureApp-API.postman_collection.json      # Postman API collection
-└── src/main/
-    ├── java/com/example/secureapp/
-    │   ├── SecureAppApplication.java         # Main Spring Boot class
-    │   ├── config/
-    │   │   ├── SecurityConfig.java            # Security & CORS configuration
-    │   │   ├── SessionConfig.java             # JDBC session store configuration
-    │   │   └── WebMvcConfig.java              # MVC interceptor registration
-    │   ├── controller/
-    │   │   ├── AuthController.java            # Authentication endpoints
-    │   │   └── DashboardController.java       # Protected endpoints
-    │   ├── service/
-    │   │   └── AuthService.java               # Authentication business logic
-    │   ├── repository/
-    │   │   ├── UserRepository.java            # User data access
-    │   │   └── RoleRepository.java            # Role data access
-    │   ├── entity/
-    │   │   ├── User.java                      # User JPA entity
-    │   │   └── Role.java                      # Role JPA entity
-    │   ├── dto/
-    │   │   ├── LoginRequest.java              # Login DTO
-    │   │   ├── SignUpRequest.java             # Registration DTO
-    │   │   ├── UserResponse.java              # User response DTO
-    │   │   └── ApiResponse.java               # Generic API response wrapper
-    │   ├── security/
-    │   │   ├── CustomUserDetailsService.java  # Spring Security user details service
-    │   │   ├── AuthorizationInterceptor.java  # Custom authorization interceptor
-    │   │   └── RolePermissionMapping.java     # Centralized role-path permission map
-    │   ├── exception/
-    │   │   ├── ResourceNotFoundException.java # 404 exception
-    │   │   ├── BadRequestException.java       # 400 exception
-    │   │   └── GlobalExceptionHandler.java    # Global exception handler
-    │   ├── filter/
-    │   │   ├── SecurityHeadersFilter.java     # Adds 8 security headers
-    │   │   └── SessionValidationFilter.java   # Validates session before controllers
-    │   └── util/
-    │       ├── SecurityUtil.java              # Request-level security utilities
-    │       └── SecurityUtils.java             # Static security context utilities
-    └── resources/
-        └── application.properties              # Configuration file
+src/main/java/com/example/secureapp/
+├── SecureAppApplication.java              # Spring Boot entry point
+├── config/
+│   ├── SecurityConfig.java                # Spring Security filter chain, CORS, CSRF, session mgmt
+│   ├── SessionConfig.java                 # @EnableJdbcHttpSession (15-min timeout)
+│   └── WebMvcConfig.java                  # Registers AuthorizationInterceptor
+├── controller/
+│   ├── AuthController.java                # Login (with DPoP binding), register, logout, /auth/me
+│   └── DashboardController.java           # /health, /dashboard, /admin/users
+├── dpop/
+│   ├── DPoPAuthenticationFilter.java      # Filter: validates DPoP proof on every authenticated request
+│   ├── DPoPConstants.java                 # Header names, claim keys, cache config constants
+│   ├── DPoPProofValidator.java            # Parses & validates DPoP proof JWT (RFC 9449)
+│   ├── DPoPReplayProtectionService.java   # Caffeine cache for jti replay protection
+│   ├── DPoPSessionBindingService.java     # Binds client public key to session at login
+│   └── DPoPValidationException.java       # Thrown when DPoP proof fails validation
+├── dto/
+│   ├── ApiResponse.java                   # Standard response wrapper {success, message, data, statusCode}
+│   ├── LoginRequest.java                  # Login DTO {username, password}
+│   ├── SignUpRequest.java                 # Registration DTO with validation
+│   └── UserResponse.java                 # User response DTO
+├── entity/
+│   ├── Role.java                          # JPA entity: roles table
+│   └── User.java                          # JPA entity: users table (ManyToMany → roles)
+├── exception/
+│   ├── BadRequestException.java           # 400 Bad Request
+│   ├── GlobalExceptionHandler.java        # @RestControllerAdvice — centralized error handling
+│   └── ResourceNotFoundException.java     # 404 Not Found
+├── filter/
+│   ├── SecurityHeadersFilter.java         # Adds CSP, HSTS, X-Frame-Options, etc.
+│   └── SessionValidationFilter.java       # Validates session + auth on protected endpoints
+├── repository/
+│   ├── RoleRepository.java                # JPA repository for Role
+│   └── UserRepository.java               # JPA repository for User
+├── security/
+│   ├── AuthorizationInterceptor.java      # MVC interceptor: role-based path authorization
+│   ├── CustomUserDetailsService.java      # Loads UserDetails from DB for Spring Security
+│   └── RolePermissionMapping.java         # Centralized path → allowed-roles mapping
+├── service/
+│   └── AuthService.java                   # Business logic: register, login, getUserById
+└── util/
+    ├── SecurityUtil.java                  # Client IP detection, secure connection check
+    └── SecurityUtils.java                 # Static: getCurrentUser(), getCurrentUserRoles(), hasRole()
 ```
+
+---
 
 ## Security Features
 
-### 1. **Session Management**
-- Server-side sessions stored in PostgreSQL via JDBC (Spring Session JDBC)
-- HttpOnly cookies (cannot be accessed via JavaScript)
-- Secure flag (HTTPS only in production)
-- SameSite=Strict policy (CSRF protection)
-- Session timeout: 15 minutes (900 seconds)
-- Max sessions per user: 1
-- Custom SessionValidationFilter for defense-in-depth session checks
+### 1. Session-Based Authentication (JDBC-Backed)
+- Sessions stored in PostgreSQL via Spring Session JDBC
+- 15-minute session timeout (configurable)
+- Session fixation protection: session ID rotated on login
+- Maximum 1 concurrent session per user
+- Secure cookie settings: `HttpOnly`, `Secure`, `SameSite=Strict`
 
-### 2. **Authentication**
-- Username/password-based login
-- Bcrypt password hashing (strength 12)
-- Login endpoint: `POST /api/auth/login`
-- Registration endpoint: `POST /api/auth/register`
-- Logout endpoint: `POST /api/auth/logout`
-- Session attribute storage for user context
+### 2. DPoP (Demonstration of Proof-of-Possession) — RFC 9449
+- Client generates an ECDSA P-256 keypair locally (browser WebCrypto API)
+- At login, client sends a self-signed DPoP proof JWT with the public key embedded
+- Server validates the proof and binds the public key to the session
+- Every subsequent request must include a fresh DPoP proof signed by the same private key
+- JWK thumbprint comparison prevents session cookie theft from being useful
 
-### 3. **Authorization**
-- Role-based access control (RBAC)
-- Default roles: `ROLE_USER`, `ROLE_ADMIN`, `ROLE_MODERATOR`
-- Protected endpoints require authentication
-- Admin endpoints require `ROLE_ADMIN`
-- Method-level security with `@PreAuthorize`
-- Custom `AuthorizationInterceptor` with centralized `RolePermissionMapping`
+### 3. CSRF Protection
+- Enabled via `CookieCsrfTokenRepository` (cookie-based, `HttpOnly=false` for JS read)
+- All state-changing requests (POST, PUT, DELETE, PATCH) require a valid CSRF token
 
-### 4. **CSRF Protection**
-- Built-in Spring Security CSRF protection
-- Token validation on state-changing requests
-- Works seamlessly with session-based authentication
+### 4. CORS
+- Allowed origin: `http://localhost:4200` (Angular dev server)
+- Credentials allowed (cookies, auth headers)
+- Preflight cache: 3600 seconds
 
-### 5. **Security Headers**
-- `Content-Security-Policy`: Restricts resource loading
-- `X-XSS-Protection`: XSS attack prevention
-- `X-Frame-Options`: Clickjacking protection (DENY)
-- `X-Content-Type-Options`: Prevents MIME-sniffing (nosniff)
-- `Strict-Transport-Security`: Enforces HTTPS (1 year with preload)
-- `Referrer-Policy`: Controls referrer information
-- `Permissions-Policy`: Disables camera, microphone, geolocation, etc.
-- `Cache-Control`: Prevents caching of sensitive data
+### 5. Security Headers (SecurityHeadersFilter)
+| Header                    | Value                                                     |
+|---------------------------|-----------------------------------------------------------|
+| Content-Security-Policy   | `default-src 'self'; script-src 'self'; ...`              |
+| X-Frame-Options           | `DENY`                                                    |
+| X-Content-Type-Options    | `nosniff`                                                 |
+| Strict-Transport-Security | `max-age=31536000; includeSubDomains; preload`            |
+| X-XSS-Protection          | `1; mode=block`                                           |
+| Referrer-Policy           | `strict-origin-when-cross-origin`                         |
+| Permissions-Policy        | `accelerometer=(), camera=(), geolocation=(), ...`        |
+| Cache-Control             | `no-store, no-cache, must-revalidate, max-age=0`         |
 
-### 6. **CORS Configuration**
-- Configured for Angular frontend (localhost:4200)
-- Supports credentials (cookies)
-- Allowed methods: GET, POST, PUT, DELETE, PATCH, OPTIONS
-- Max age: 1 hour
+### 6. Role-Based Access Control (AuthorizationInterceptor + RolePermissionMapping)
+Every request passes through a Spring MVC interceptor that checks the user's roles against a centralized permission map.
 
-### 7. **Input Validation**
-- Jakarta Bean Validation annotations
-- Comprehensive error messages
-- Global exception handling with validation error details
+### 7. Password Security
+- BCrypt with strength 12
+- Minimum 8 characters on registration
 
-## API Endpoints
+---
 
-### Authentication Endpoints
+## DPoP (Demonstration of Proof-of-Possession)
 
-#### Register New User
+### What Problem Does DPoP Solve?
+Standard session cookies can be stolen via XSS, network interception, or browser extensions. DPoP adds a **cryptographic binding** — the client must prove it holds a private key that corresponds to the public key registered at login time.
+
+### How It Works
+
 ```
-POST /api/auth/register
-Content-Type: application/json
+LOGIN FLOW:
+1. Client generates ECDSA P-256 keypair (crypto.subtle.generateKey)
+2. Client builds a DPoP proof JWT:
+   Header: { "typ": "dpop+jwt", "alg": "ES256", "jwk": { <public-key> } }
+   Payload: { "htm": "POST", "htu": "http://localhost:8080/api/auth/login",
+              "iat": <now>, "jti": "<uuid>" }
+3. Client signs the JWT with the private key
+4. Client sends: POST /api/auth/login
+   Body: { username, password }
+   Header: DPoP: <signed-jwt>
+5. Server validates credentials → validates DPoP proof → binds public key to session
 
+SUBSEQUENT REQUESTS:
+1. Client builds a fresh DPoP proof for the target endpoint
+2. Client sends request with: Cookie: JSESSIONID=xxx + DPoP: <new-proof>
+3. DPoPAuthenticationFilter:
+   a. Parses & verifies the proof JWT signature
+   b. Validates htm (HTTP method) and htu (request URI)
+   c. Checks iat is within 5-minute window
+   d. Checks jti uniqueness (replay protection via Caffeine cache)
+   e. Compares JWK thumbprint with session-bound thumbprint
+   f. If all pass → request proceeds; otherwise → 401
+```
+
+### DPoP Proof JWT Structure
+```json
 {
-  "username": "john_doe",
-  "email": "john@example.com",
-  "firstName": "John",
-  "lastName": "Doe",
+  "header": {
+    "typ": "dpop+jwt",
+    "alg": "ES256",
+    "jwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "<base64url>",
+      "y": "<base64url>"
+    }
+  },
+  "payload": {
+    "htm": "GET",
+    "htu": "http://localhost:8080/api/dashboard",
+    "iat": 1741785600,
+    "jti": "unique-random-uuid"
+  }
+}
+```
+
+### Validation Rules (RFC 9449)
+| Check                | Rule                                                  |
+|----------------------|-------------------------------------------------------|
+| `typ`                | Must be `dpop+jwt`                                    |
+| `alg`                | Must be `ES256` (ECDSA P-256)                         |
+| `jwk`                | Must be an EC public key (no private key material)    |
+| Signature            | Verified using the embedded public key                |
+| `htm`                | Must match the HTTP method of the current request     |
+| `htu`                | Must match the full request URI                       |
+| `iat`                | Must be within ±300 seconds of server time            |
+| `jti`                | Must be unique (not seen in the replay cache)         |
+| JWK Thumbprint       | Must match the thumbprint bound to the session        |
+
+---
+
+## Request Flow
+
+### Public Endpoints (No Authentication Required)
+```
+POST /api/auth/register   → Create new user account
+POST /api/auth/login      → Authenticate + bind DPoP key to session
+POST /api/auth/logout     → Invalidate session
+GET  /api/health          → Health check
+```
+
+### Protected Endpoints (Session + DPoP Required)
+```
+Request → DPoPAuthenticationFilter → SessionValidationFilter
+        → AuthorizationInterceptor → Controller
+
+GET  /api/auth/me          → Get current authenticated user
+GET  /api/dashboard        → Dashboard (ROLE_USER, ROLE_ADMIN)
+GET  /api/admin/users      → Admin-only user list (ROLE_ADMIN)
+```
+
+---
+
+## API Reference
+
+### Base URL
+```
+http://localhost:8080/api
+```
+
+### Standard Response Format
+```json
+{
+  "success": true,
+  "message": "Operation description",
+  "data": { ... },
+  "statusCode": 200,
+  "timestamp": 1741785600000
+}
+```
+
+### Error Response Format (from filters)
+```json
+{
+  "status": "ERROR",
+  "message": "Error description",
+  "timestamp": "2026-03-12T10:00:00Z"
+}
+```
+
+### Endpoints
+
+#### POST /auth/register
+Create a new user account with the default `ROLE_USER` role.
+
+**Request Body:**
+```json
+{
+  "username": "newuser",
+  "email": "newuser@example.com",
+  "firstName": "New",
+  "lastName": "User",
   "password": "SecurePass123!",
   "confirmPassword": "SecurePass123!"
 }
+```
 
-Response (201 Created):
+**Validation Rules:**
+- `username`: Required, 3–50 characters
+- `email`: Required, valid email format
+- `firstName`: Required, 2–50 characters
+- `lastName`: Required, 2–50 characters
+- `password`: Required, 8–128 characters
+- `confirmPassword`: Required, must match password
+
+**Response (201):**
+```json
 {
   "success": true,
   "message": "User registered successfully",
-  "statusCode": 201,
   "data": {
-    "id": 1,
-    "username": "john_doe",
-    "email": "john@example.com",
-    "firstName": "John",
-    "lastName": "Doe",
+    "id": 3,
+    "username": "newuser",
+    "email": "newuser@example.com",
+    "firstName": "New",
+    "lastName": "User",
     "enabled": true,
     "roles": ["ROLE_USER"],
-    "createdAt": "2026-03-10T12:00:00"
-  }
+    "createdAt": "2026-03-12T10:00:00",
+    "updatedAt": "2026-03-12T10:00:00"
+  },
+  "statusCode": 201
 }
 ```
 
-#### Login
-```
-POST /api/auth/login
-Content-Type: application/json
+#### POST /auth/login
+Authenticate the user, rotate session, and bind DPoP public key.
 
+**Required Headers:**
+- `Content-Type: application/json`
+- `DPoP: <self-signed-dpop-proof-jwt>`
+
+**Request Body:**
+```json
 {
-  "username": "john_doe",
-  "password": "SecurePass123!"
+  "username": "testuser",
+  "password": "UserPass123!"
 }
+```
 
-Response (200 OK):
-Sets JSESSIONID cookie with HttpOnly flag
+**Response (200):**
+```json
 {
   "success": true,
   "message": "Login successful",
-  "statusCode": 200,
   "data": {
-    "id": 1,
-    "username": "john_doe",
-    "email": "john@example.com",
-    "roles": ["ROLE_USER"],
-    "lastLogin": "2026-03-10T12:05:00"
-  }
-}
-```
-
-#### Get Current User
-```
-GET /api/auth/me
-Cookie: JSESSIONID=xxx
-
-Response (200 OK):
-{
-  "success": true,
-  "message": "User fetched successfully",
-  "statusCode": 200,
-  "data": { ... }
-}
-```
-
-#### Logout
-```
-POST /api/auth/logout
-Cookie: JSESSIONID=xxx
-
-Response (200 OK):
-Invalidates JSESSIONID cookie
-{
-  "success": true,
-  "message": "Logout successful",
-  "statusCode": 200
-}
-```
-
-### Protected Endpoints
-
-#### Dashboard (Authenticated Users)
-```
-GET /api/dashboard
-Cookie: JSESSIONID=xxx
-
-Response (200 OK):
-{
-  "success": true,
-  "message": "Dashboard data fetched",
-  "statusCode": 200,
-  "data": {
-    "message": "Welcome to dashboard, john_doe"
-  }
-}
-```
-
-#### Admin Users List (ROLE_ADMIN Only)
-```
-GET /api/admin/users
-Cookie: JSESSIONID=xxx (Admin user)
-
-Response (200 OK):
-{
-  "success": true,
-  "message": "Users data fetched",
-  "statusCode": 200
-}
-```
-
-### Health Check
-```
-GET /api/health
-
-Response (200 OK):
-{
-  "success": true,
-  "message": "Service is healthy",
-  "statusCode": 200,
-  "data": {
-    "status": "UP"
-  }
-}
-```
-
-## Setup & Installation
-
-### Prerequisites
-- Java 21 (JDK)
-- Maven 3.9.12+
-- PostgreSQL 12+
-
-### Step 1: Database Setup
-```sql
--- Create database
-CREATE DATABASE secureapp_db;
-
--- Connect to database
-\c secureapp_db;
-
--- Create roles table
-CREATE TABLE roles (
-  id BIGSERIAL PRIMARY KEY,
-  name VARCHAR(50) UNIQUE NOT NULL,
-  description VARCHAR(255),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Create users table
-CREATE TABLE users (
-  id BIGSERIAL PRIMARY KEY,
-  username VARCHAR(100) UNIQUE NOT NULL,
-  email VARCHAR(255) UNIQUE NOT NULL,
-  password TEXT NOT NULL,
-  first_name VARCHAR(100) NOT NULL,
-  last_name VARCHAR(100) NOT NULL,
-  phone_number VARCHAR(20),
-  address TEXT,
-  enabled BOOLEAN DEFAULT true,
-  account_non_expired BOOLEAN DEFAULT true,
-  account_non_locked BOOLEAN DEFAULT true,
-  credentials_non_expired BOOLEAN DEFAULT true,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  last_login TIMESTAMP
-);
-
--- Create user_roles junction table
-CREATE TABLE user_roles (
-  user_id BIGINT NOT NULL,
-  role_id BIGINT NOT NULL,
-  PRIMARY KEY (user_id, role_id),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
-);
-
--- Insert default roles
-INSERT INTO roles (name, description) VALUES 
-('ROLE_USER', 'Standard user role'),
-('ROLE_ADMIN', 'Administrator role'),
-('ROLE_MODERATOR', 'Moderator role');
-
--- Create indexes
-CREATE INDEX idx_username ON users(username);
-CREATE INDEX idx_email ON users(email);
-
--- Note: init-database.sql also creates Spring Session JDBC tables
--- (SPRING_SESSION, SPRING_SESSION_ATTRIBUTES) required for session storage
-```
-
-### Step 2: Configure Application Properties
-Edit `src/main/resources/application.properties`:
-```properties
-# PostgreSQL
-spring.datasource.url=jdbc:postgresql://localhost:5432/secureapp_db
-spring.datasource.username=postgres
-spring.datasource.password=your_password
-```
-
-### Step 3: Build the Project
-```bash
-cd E:\Projects\Agristack\poc\SecureDemo
-mvn clean compile
-mvn package
-```
-
-### Step 4: Run the Application
-```bash
-java -jar target/secureapp-1.0.0.jar
-```
-
-Application will start on: `http://localhost:8080/api`
-
-## Configuration Reference
-
-### application.properties
-
-| Property | Description | Default |
-|----------|-------------|---------|
-| `server.port` | Server port | 8080 |
-| `server.servlet.context-path` | Context path | /api |
-| `spring.datasource.url` | PostgreSQL URL | jdbc:postgresql://localhost:5432/secureapp_db |
-| `spring.jpa.hibernate.ddl-auto` | Hibernate DDL strategy | update |
-| `spring.session.store-type` | Session store | jdbc |
-| `server.servlet.session.cookie.max-age` | Session max age | 900 (15 minutes) |
-| `server.servlet.session.timeout` | Session timeout | 15m |
-
-## Building from Source
-
-### Prerequisites Verification
-```bash
-java -version
-mvn --version
-```
-
-### Maven Build Process
-```bash
-# Clean and compile
-mvn clean compile
-
-# Run tests (if configured)
-mvn test
-
-# Package JAR
-mvn package
-
-# Build with all phases
-mvn clean package
-```
-
-### Build Output
-- Compiled classes: `target/classes/`
-- JAR file: `target/secureapp-1.0.0.jar`
-
-## Production Deployment
-
-### Pre-Deployment Checklist
-- [ ] Update `application.properties` with production URLs
-- [ ] Configure HTTPS certificate
-- [ ] Set secure database passwords via environment variables
-- [ ] Enable Spring Security HTTPS only
-- [ ] Configure proper CORS origins
-- [ ] Set up database backups
-- [ ] Configure logging to files
-- [ ] Set environment variables for sensitive data
-
-### Docker Deployment
-Create a `Dockerfile`:
-```dockerfile
-FROM openjdk:21-jdk-slim
-COPY target/secureapp-1.0.0.jar app.jar
-ENTRYPOINT ["java", "-jar", "/app.jar"]
-```
-
-Build and run:
-```bash
-docker build -t secureapp:1.0.0 .
-docker run -p 8080:8080 --env-file .env secureapp:1.0.0
-```
-
-## Troubleshooting
-
-### Common Issues
-
-**1. Database Connection Error**
-```
-Solution: Verify PostgreSQL is running and credentials in application.properties
-psql -U postgres -h localhost -d secureapp_db
-```
-
-**2. Port Already in Use**
-```
-Solution: Change server.port in application.properties or:
-netstat -ano | findstr :8080
-taskkill /PID <PID> /F
-```
-
-**3. Maven Build Failures**
-```
-Solution: Clear Maven cache and rebuild
-mvn clean -U install
-```
-
-## Security Best Practices
-
-1. **Passwords**: Use strong passwords (min 8 chars, mix of uppercase, lowercase, numbers, special chars)
-2. **HTTPS**: Always use HTTPS in production (set `server.ssl.enabled=true`)
-3. **Session**: Set appropriate timeout based on security requirements
-4. **CORS**: Restrict CORS origins to trusted domains only
-5. **Secrets**: Never commit passwords/API keys - use environment variables
-6. **Logging**: Don't log sensitive data (passwords, tokens, PII)
-7. **Database**: Use parameterized queries (JPA handles this automatically)
-8. **Updates**: Keep Spring Boot and dependencies updated
-
-## Testing the API
-
-### Using cURL
-```bash
-# Register
-curl -X POST http://localhost:8080/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
+    "id": 2,
     "username": "testuser",
     "email": "test@example.com",
     "firstName": "Test",
     "lastName": "User",
-    "password": "TestPass123!",
-    "confirmPassword": "TestPass123!"
-  }'
-
-# Login
-curl -X POST http://localhost:8080/api/auth/login \
-  -H "Content-Type: application/json" \
-  -c cookies.txt \
-  -d '{
-    "username": "testuser",
-    "password": "TestPass123!"
-  }'
-
-# Access Protected Endpoint
-curl -X GET http://localhost:8080/api/dashboard \
-  -b cookies.txt
-
-# Logout
-curl -X POST http://localhost:8080/api/auth/logout \
-  -b cookies.txt
-```
-
-### Using Postman
-1. Import the provided Postman collection (if available)
-2. Set environment variables for base URL
-3. Login first to get session cookie
-4. Use session cookie for protected endpoints
-
-## Development
-
-### Adding New Endpoints
-1. Create controller in `controller/` package
-2. Add service logic in `service/` package
-3. Use `@PreAuthorize` for role-based security
-4. Add validation DTOs in `dto/` package
-5. Use `ApiResponse<T>` for consistent response format
-
-### Adding New Entities
-1. Create entity in `entity/` package with JPA annotations
-2. Create repository in `repository/` package extending `JpaRepository`
-3. Use `@Table`, `@Column` for database mapping
-4. Add validation constraints from `jakarta.validation`
-
-### Exception Handling
-All exceptions should extend `RuntimeException` or custom exception classes. Global exception handler will return:
-```json
-{
-  "success": false,
-  "message": "Error description",
-  "statusCode": 400,
-  "timestamp": 1678425600000
+    "enabled": true,
+    "roles": ["ROLE_USER"],
+    "lastLogin": "2026-03-12T10:00:00"
+  },
+  "statusCode": 200
 }
 ```
 
-## Performance Optimization
+**Response Headers (set by server):**
+- `Set-Cookie: JSESSIONID=<new-session-id>; Path=/; HttpOnly; Secure; SameSite=Strict`
 
-- **Caching**: Configure Spring Cache with a suitable provider
-- **Database**: Add indexes on frequently queried columns
-- **Connection Pooling**: HikariCP (auto-configured)
-- **Lazy Loading**: Use `FetchType.LAZY` for relationships
-- **Pagination**: Implement for large result sets
+#### POST /auth/logout
+Invalidate the current session.
 
-## License
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Logout successful",
+  "data": null,
+  "statusCode": 200
+}
+```
 
-Proprietary - Enterprise Application
+#### GET /auth/me (Protected)
+Get the currently authenticated user's profile.
 
-## Support
+**Required Headers:**
+- `DPoP: <fresh-dpop-proof-jwt>`
+- `Cookie: JSESSIONID=<session-id>`
 
-For issues and support, contact the development team.
+#### GET /health (Public)
+Health check endpoint — no authentication required.
+
+#### GET /dashboard (Protected — ROLE_USER, ROLE_ADMIN)
+Dashboard for authenticated users.
+
+#### GET /admin/users (Protected — ROLE_ADMIN only)
+Admin-only endpoint.
 
 ---
 
-**Created**: March 10, 2026
-**Version**: 1.0.0
-**Status**: Production Ready
+## Role-Based Access Control
+
+### Permission Matrix (RolePermissionMapping)
+
+| Path Pattern           | ROLE_USER | ROLE_ADMIN | Notes                          |
+|------------------------|-----------|------------|--------------------------------|
+| `/auth/login`          | Public    | Public     | No auth required               |
+| `/auth/register`       | Public    | Public     | No auth required               |
+| `/auth/logout`         | Public    | Public     | No auth required               |
+| `/health`              | Public    | Public     | No auth required               |
+| `/dashboard/**`        | ✅        | ✅         | Any authenticated user         |
+| `/admin/**`            | ❌        | ✅         | Admin only                     |
+| `/activity/admin/**`   | ❌        | ✅         | Admin only                     |
+| `/activity/profile/**` | ✅        | ✅         | User + Admin                   |
+| `/activity/action/**`  | ✅        | ✅         | User + Admin                   |
+| All other paths        | ✅*       | ✅*        | *Requires authentication only  |
+
+### Authorization Enforcement Layers
+1. **Spring Security** (`SecurityConfig`) — `.authorizeHttpRequests()` enforces authentication
+2. **DPoPAuthenticationFilter** — Validates cryptographic proof-of-possession
+3. **SessionValidationFilter** — Validates session existence and attributes
+4. **AuthorizationInterceptor** — Role-based path authorization via `RolePermissionMapping`
+5. **`@PreAuthorize`** — Method-level security on controller methods
+
+---
+
+## Database Setup
+
+### Prerequisites
+- PostgreSQL server running on `localhost:5432`
+- Database: `secureapp_db`
+- User: `postgres` / Password: `postgres`
+
+### Initialize Database
+```sql
+-- Create the database
+CREATE DATABASE secureapp_db;
+
+-- Connect and run the init script
+\c secureapp_db
+\i init-database.sql
+```
+
+Or run the SQL script directly:
+```bash
+psql -U postgres -d secureapp_db -f init-database.sql
+```
+
+### Tables Created
+| Table                       | Purpose                                         |
+|-----------------------------|--------------------------------------------------|
+| `roles`                     | Role definitions (ROLE_USER, ROLE_ADMIN, etc.)   |
+| `users`                     | User accounts with credentials and profile data  |
+| `user_roles`                | Many-to-many junction table for user ↔ role      |
+| `SPRING_SESSION`            | JDBC-backed HTTP sessions                        |
+| `SPRING_SESSION_ATTRIBUTES` | Session attribute storage (incl. DPoP keys)      |
+
+---
+
+## Configuration
+
+### Key Properties (`application.properties`)
+
+| Property                                    | Value                   | Description                              |
+|---------------------------------------------|-------------------------|------------------------------------------|
+| `server.port`                               | `8080`                  | Application port                         |
+| `server.servlet.context-path`               | `/api`                  | All URLs prefixed with `/api`            |
+| `spring.session.store-type`                 | `jdbc`                  | Sessions stored in PostgreSQL            |
+| `server.servlet.session.timeout`            | `15m`                   | Session timeout                          |
+| `server.servlet.session.cookie.http-only`   | `true`                  | Cookie not accessible via JavaScript     |
+| `server.servlet.session.cookie.secure`      | `true`                  | Cookie sent only over HTTPS              |
+| `server.servlet.session.cookie.same-site`   | `strict`                | CSRF mitigation                          |
+| `spring.jpa.hibernate.ddl-auto`             | `update`                | Auto-update schema                       |
+| `app.security.dpop.max-proof-age-seconds`   | `300`                   | DPoP proof validity window (5 min)       |
+| `app.security.dpop.jti-cache-max-size`      | `100000`                | Max entries in JTI replay cache          |
+
+---
+
+## Running the Application
+
+### Prerequisites
+1. Java 21 installed
+2. Maven installed
+3. PostgreSQL running with `secureapp_db` database created
+4. Run `init-database.sql` to create tables and seed data
+
+### Build & Run
+```bash
+# Build
+mvn clean compile
+
+# Run
+mvn spring-boot:run
+
+# Or build JAR and run
+mvn clean package -DskipTests
+java -jar target/secureapp-1.0.0.jar
+```
+
+### Verify
+```bash
+curl http://localhost:8080/api/health
+```
+
+Expected response:
+```json
+{
+  "success": true,
+  "message": "Service is healthy",
+  "data": { "status": "UP" },
+  "statusCode": 200
+}
+```
+
+---
+
+## Default Test Credentials
+
+| User      | Username   | Password        | Roles                    |
+|-----------|------------|-----------------|--------------------------|
+| Admin     | `admin`    | `AdminPass123!` | ROLE_ADMIN, ROLE_USER    |
+| Test User | `testuser` | `UserPass123!`  | ROLE_USER                |
+
+> ⚠️ **Change these passwords after first login in production!**
+
+---
+
+## Postman Collection
+
+Import `SecureApp-API.postman_collection.json` for a complete API test suite including:
+- Health check tests
+- User registration (success + duplicate validation)
+- Login with DPoP proof generation (pre-request scripts)
+- Session-based protected endpoint access
+- Role-based authorization tests (USER vs ADMIN)
+- Session invalidation / post-logout verification
+- DPoP validation failure tests
+
+The collection includes **pre-request scripts** that automatically generate ECDSA P-256 keypairs and DPoP proof JWTs for testing.
+
+---
+
+## Architecture Diagrams
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for detailed visual diagrams covering:
+- High-level system overview (Client → Server → Database)
+- Security filter chain pipeline (9-step request processing)
+- Login flow with DPoP key binding & session creation
+- Authenticated request flow (DPoP + session verification)
+- Component dependency diagram
+- Session lifecycle & storage
+- DPoP attack prevention model (5 attack scenarios)
+- Entity-relationship diagram
+- Technology stack map
+- Security headers response anatomy

@@ -1,425 +1,169 @@
 ================================================================================
-                    SECUREAPP - PROJECT SUMMARY
-                  Production-Grade Spring Boot Backend
+                    SecureApp — Project Summary
 ================================================================================
-
-Project Location: E:\Projects\Agristack\poc\SecureDemo
-Created: March 10, 2026
-Status: PRODUCTION READY
-
-================================================================================
-                         PROJECT COMPLETION REPORT
-================================================================================
-
-✓ COMPLETED ITEMS:
-
-1. PROJECT STRUCTURE
-   ✓ Maven project with pom.xml
-   ✓ Standard directory layout (src/main/java, src/main/resources)
-   ✓ All required packages created:
-     - com.example.secureapp.config        (Security configuration)
-     - com.example.secureapp.controller    (REST endpoints)
-     - com.example.secureapp.service       (Business logic)
-     - com.example.secureapp.repository    (Data access)
-     - com.example.secureapp.entity        (JPA entities)
-     - com.example.secureapp.dto           (Data transfer objects)
-     - com.example.secureapp.security      (Security components)
-     - com.example.secureapp.exception     (Exception handling)
-     - com.example.secureapp.filter        (Request filters)
-     - com.example.secureapp.util          (Utility classes)
-
-2. TECHNOLOGY STACK
-   ✓ Java 21
-   ✓ Spring Boot 4.0.3
-   ✓ Spring Security (latest)
-   ✓ Spring Web (REST controllers)
-   ✓ Spring Data JPA (ORM)
-   ✓ Spring Session JDBC (distributed sessions)
-   ✓ PostgreSQL Driver (42.7.3)
-   ✓ Lombok (annotations)
-   ✓ Jakarta Validation (input validation)
-   ✓ Maven 3.9.12+
-
-3. CORE COMPONENTS
-   ✓ SecureAppApplication.java - Main Spring Boot class with session config
-   ✓ SecurityConfig.java - Comprehensive security configuration
-   ✓ User.java - JPA entity with proper mappings
-   ✓ Role.java - Role entity with relationship to users
-   ✓ UserRepository.java - User data access with custom queries
-   ✓ RoleRepository.java - Role data access
-   ✓ AuthService.java - Authentication and registration logic
-   ✓ AuthController.java - Authentication endpoints (login, register, logout)
-   ✓ DashboardController.java - Protected endpoints with role-based access
-   ✓ CustomUserDetailsService.java - Spring Security user details provider
-   ✓ DTOs: LoginRequest, SignUpRequest, UserResponse, ApiResponse
-
-4. SECURITY FEATURES IMPLEMENTED
-   ✓ Session-based authentication with server-side sessions
-   ✓ HttpOnly cookies (cannot be accessed by JavaScript)
-   ✓ Secure flag (HTTPS only in production)
-   ✓ SameSite=Strict CSRF protection
-   ✓ BCrypt password hashing (strength 12)
-   ✓ Role-based access control (RBAC)
-   ✓ Method-level security with @PreAuthorize
-   ✓ Global exception handler for all errors
-   ✓ Input validation with Jakarta Bean Validation
-   ✓ Security headers (CSP, X-Frame-Options, XSS protection)
-   ✓ CORS configuration for Angular frontend
-   ✓ Session fixation protection
-
-5. DATABASE CONFIGURATION
-   ✓ PostgreSQL support in pom.xml
-   ✓ Database initialization script (init-database.sql)
-   ✓ Sample admin and test users with hashed passwords
-   ✓ Role-based user assignments
-   ✓ Proper indexes on frequently queried columns
-   ✓ Foreign key relationships configured
-
-6. API ENDPOINTS
-   ✓ POST /api/auth/register - User registration
-   ✓ POST /api/auth/login - User login
-   ✓ POST /api/auth/logout - User logout
-   ✓ GET /api/auth/me - Get current user
-   ✓ GET /api/health - Health check
-   ✓ GET /api/dashboard - Protected user endpoint
-   ✓ GET /api/admin/users - Protected admin endpoint
-
-7. CONFIGURATION FILES
-   ✓ pom.xml - Complete Maven configuration with all dependencies
-   ✓ application.properties - Server, database, session configuration
-   ✓ .gitignore - Git ignore patterns
-   ✓ README.md - Comprehensive documentation
-   ✓ init-database.sql - Database initialization script
-   ✓ SecureApp-API.postman_collection.json - Postman API collection
-
-8. DOCUMENTATION
-   ✓ Comprehensive README.md with:
-     - Project overview
-     - Technology stack details
-     - Project structure explanation
-     - Security features description
-     - API endpoints documentation
-     - Setup and installation guide
-     - Database schema
-     - Configuration reference
-     - Deployment instructions
-     - Troubleshooting guide
-     - Best practices
-     - Testing instructions
+Version:        1.0.0
+Java:           21
+Spring Boot:    4.0.3
+Last Updated:   March 12, 2026
 
 ================================================================================
-                         PROJECT FILES SUMMARY
+  OVERVIEW
 ================================================================================
 
-PROJECT ROOT DIRECTORY:
-├── pom.xml                                    (114 lines, Maven configuration)
-├── README.md                                  (540+ lines, Complete documentation)
-├── .gitignore                                 (Git ignore patterns)
-├── init-database.sql                          (SQL initialization script)
-├── SecureApp-API.postman_collection.json      (Postman API test collection)
-└── src/
-    └── main/
-        ├── java/com/example/secureapp/
-        │   ├── SecureAppApplication.java      (Main Spring Boot class)
-        │   ├── config/
-        │   │   ├── SecurityConfig.java        (Security & CORS configuration)
-        │   │   ├── SessionConfig.java         (JDBC session store config)
-        │   │   └── WebMvcConfig.java          (MVC interceptor registration)
-        │   ├── controller/
-        │   │   ├── AuthController.java        (Auth endpoints)
-        │   │   └── DashboardController.java   (Protected endpoints)
-        │   ├── service/
-        │   │   └── AuthService.java           (Auth logic)
-        │   ├── repository/
-        │   │   ├── UserRepository.java        (User DAO)
-        │   │   └── RoleRepository.java        (Role DAO)
-        │   ├── entity/
-        │   │   ├── User.java                  (User JPA entity)
-        │   │   └── Role.java                  (Role JPA entity)
-        │   ├── dto/
-        │   │   ├── LoginRequest.java          (Login DTO)
-        │   │   ├── SignUpRequest.java         (Registration DTO)
-        │   │   ├── UserResponse.java          (User response DTO)
-        │   │   └── ApiResponse.java           (Generic API response)
-        │   ├── security/
-        │   │   ├── CustomUserDetailsService.java (User details service)
-        │   │   ├── AuthorizationInterceptor.java (Role-based path auth)
-        │   │   └── RolePermissionMapping.java    (Role-path permission map)
-        │   ├── exception/
-        │   │   ├── ResourceNotFoundException.java
-        │   │   ├── BadRequestException.java
-        │   │   └── GlobalExceptionHandler.java (Exception handler)
-        │   ├── filter/
-        │   │   ├── SecurityHeadersFilter.java  (8 security headers)
-        │   │   └── SessionValidationFilter.java (Session validation)
-        │   └── util/
-        │       ├── SecurityUtil.java           (Request-level utilities)
-        │       └── SecurityUtils.java          (Static SecurityContext utils)
-        └── resources/
-            └── application.properties          (Application configuration)
-
-TOTAL FILES CREATED: 24 Java files + Configuration files
+SecureApp is a production-grade Spring Boot backend with enterprise security:
+  - Session-based authentication with JDBC-backed sessions (PostgreSQL)
+  - DPoP (Demonstration of Proof-of-Possession) — RFC 9449
+  - CSRF protection (CookieCsrfTokenRepository)
+  - Role-based access control (AuthorizationInterceptor + RolePermissionMapping)
+  - Comprehensive security headers (CSP, HSTS, X-Frame-Options, etc.)
+  - BCrypt password hashing (strength 12)
 
 ================================================================================
-                         BUILD INFORMATION
+  REQUEST FLOW
 ================================================================================
 
-PROJECT DETAILS:
-- GroupId: com.example
-- ArtifactId: secureapp
-- Version: 1.0.0
-- Packaging: JAR
-- Java Version: 21
-- Build Tool: Maven 3.9.12+
+  Client → DPoPAuthenticationFilter → SessionValidationFilter
+         → SecurityHeadersFilter → CSRF Filter
+         → AuthorizationInterceptor → Controller
 
-DEPENDENCIES INCLUDED:
-- Spring Boot Starter Web
-- Spring Boot Starter Security
-- Spring Boot Starter Data JPA
-   - Spring Session Data JDBC
-   - Spring Boot Starter Data JPA
-- Spring Boot Starter Validation
-- PostgreSQL Driver (42.7.3)
-- Lombok
-- Spring Boot Starter Actuator
-- Jakarta Servlet API
-- Spring Security Test (for testing)
-
-BUILD COMMAND:
-cd E:\Projects\Agristack\poc\SecureDemo
-mvn clean compile
-mvn package
-
-JAR OUTPUT:
-target/secureapp-1.0.0.jar
+  Public endpoints (no auth): /auth/login, /auth/register, /auth/logout, /health
+  Protected endpoints: All others require session + DPoP proof + role check
 
 ================================================================================
-                         SECURITY FEATURES
+  API ENDPOINTS (Base URL: http://localhost:8080/api)
 ================================================================================
 
-✓ Authentication:
-  - Username/password login with BCrypt hashing (strength 12)
-  - Registration with password validation
-  - Session-based with HttpOnly, Secure, SameSite cookies
+  PUBLIC:
+    POST  /auth/register     Create new user (ROLE_USER by default)
+    POST  /auth/login        Login + DPoP key binding (requires DPoP header)
+    POST  /auth/logout       Invalidate session
+    GET   /health            Health check
 
-✓ Authorization:
-  - Role-based access control (ROLE_USER, ROLE_ADMIN, ROLE_MODERATOR)
-  - Method-level security with @PreAuthorize
-  - Custom AuthorizationInterceptor with centralized RolePermissionMapping
-  - Protected endpoints require authentication
-
-✓ CSRF Protection:
-  - Enabled by default for session-based authentication
-  - Works with state-changing requests (POST, PUT, DELETE)
-
-✓ Security Headers:
-  - Content-Security-Policy (restrict resource loading)
-  - X-XSS-Protection (XSS attack prevention)
-  - X-Frame-Options (clickjacking protection)
-  - Permissions-Policy (browser feature control)
-
-✓ CORS Configuration:
-  - Configured for Angular frontend (localhost:4200)
-  - Supports credentials (cookies)
-  - Allowed methods: GET, POST, PUT, DELETE, PATCH, OPTIONS
-  - Max age: 1 hour
-
-✓ Input Validation:
-  - Jakarta Bean Validation annotations
-  - Global exception handling with validation errors
-  - Password confirmation validation
-  - Email format validation
-
-✓ Session Management:
-  - Server-side sessions in PostgreSQL (JDBC)
-  - Session timeout: 15 minutes (900 seconds)
-  - Max sessions per user: 1
-  - Session fixation protection
-  - Custom SessionValidationFilter for defense-in-depth
-  - Automatic last login tracking
+  PROTECTED (requires JSESSIONID cookie + DPoP header):
+    GET   /auth/me           Get current user profile
+    GET   /dashboard         Dashboard (ROLE_USER, ROLE_ADMIN)
+    GET   /admin/users       Admin-only user list (ROLE_ADMIN)
 
 ================================================================================
-                         DATABASE SETUP
+  DPoP (Demonstration of Proof-of-Possession)
 ================================================================================
 
-DATABASE: PostgreSQL
-TABLES CREATED BY INIT SCRIPT:
-1. roles - Stores user roles
-2. users - Stores user information
-3. user_roles - Junction table for user-role mapping
+  1. Client generates ECDSA P-256 keypair locally (WebCrypto API)
+  2. At login: client sends self-signed DPoP proof JWT with public key
+  3. Server validates proof and binds public key to the session
+  4. All subsequent requests must include a fresh DPoP proof
+  5. Server compares JWK thumbprint with session-bound thumbprint
+  6. Replay protection via Caffeine cache (jti uniqueness check)
 
-DEFAULT TEST USERS:
-1. Admin User:
-   - Username: admin
-   - Password: AdminPass123!
-   - Email: admin@secureapp.com
-   - Roles: ROLE_ADMIN, ROLE_USER
-
-2. Test User:
-   - Username: testuser
-   - Password: UserPass123!
-   - Email: test@example.com
-   - Roles: ROLE_USER
-
-SETUP STEPS:
-1. Create database: CREATE DATABASE secureapp_db;
-2. Execute: init-database.sql
-3. Update application.properties with credentials
-4. Start the application
+  DPoP Header format: DPoP: <signed-jwt>
+  JWT type: dpop+jwt
+  Algorithm: ES256 (ECDSA P-256)
+  Claims: htm (method), htu (URI), iat (timestamp), jti (unique ID)
 
 ================================================================================
-                         API ENDPOINTS
+  PROJECT STRUCTURE
 ================================================================================
 
-BASE URL: http://localhost:8080/api
+  config/
+    SecurityConfig.java          Filter chain, CORS, CSRF, session management
+    SessionConfig.java           @EnableJdbcHttpSession (15-min timeout)
+    WebMvcConfig.java            Registers AuthorizationInterceptor
 
-AUTHENTICATION:
-✓ POST /auth/register      - Register new user
-✓ POST /auth/login         - User login (sets JSESSIONID cookie)
-✓ GET  /auth/me            - Get current user (requires session)
-✓ POST /auth/logout        - User logout (invalidates session)
+  controller/
+    AuthController.java          Login (with DPoP), register, logout, /auth/me
+    DashboardController.java     /health, /dashboard, /admin/users
 
-HEALTH:
-✓ GET  /health             - Health check (no auth required)
+  dpop/
+    DPoPAuthenticationFilter.java    Validates DPoP proof on every request
+    DPoPConstants.java               Constants (headers, claims, cache config)
+    DPoPProofValidator.java          RFC 9449 proof validation logic
+    DPoPReplayProtectionService.java Caffeine cache for jti replay protection
+    DPoPSessionBindingService.java   Binds public key to session at login
+    DPoPValidationException.java     Custom exception for validation failures
 
-PROTECTED (USER):
-✓ GET  /dashboard          - User dashboard (requires authentication)
+  dto/
+    ApiResponse.java             Standard response wrapper
+    LoginRequest.java            {username, password}
+    SignUpRequest.java           {username, email, firstName, lastName, password, confirmPassword}
+    UserResponse.java            {id, username, email, roles, ...}
 
-PROTECTED (ADMIN):
-✓ GET  /admin/users        - Get all users (requires ROLE_ADMIN)
+  entity/
+    Role.java                    JPA entity (roles table)
+    User.java                    JPA entity (users table, ManyToMany → roles)
 
-RESPONSE FORMAT:
-{
-  "success": true/false,
-  "message": "Description",
-  "statusCode": 200,
-  "data": { ... },
-  "timestamp": 1234567890
-}
+  exception/
+    BadRequestException.java     400 errors
+    GlobalExceptionHandler.java  @RestControllerAdvice
+    ResourceNotFoundException.java 404 errors
 
-================================================================================
-                         CONFIGURATION
-================================================================================
+  filter/
+    SecurityHeadersFilter.java   CSP, HSTS, X-Frame-Options, etc.
+    SessionValidationFilter.java Session existence + auth validation
 
-APPLICATION PROPERTIES CONFIGURED:
-✓ Server Port: 8080
-✓ Context Path: /api
-✓ Database: PostgreSQL (localhost:5432/secureapp_db)
-✓ Session Store: JDBC (PostgreSQL - SPRING_SESSION tables)
-✓ Logging: INFO level with debug for application
-✓ Security: CSRF enabled, CORS configured
-✓ Session: HttpOnly, Secure, SameSite=Strict, 15min timeout
+  repository/
+    RoleRepository.java          JPA repository for Role
+    UserRepository.java          JPA repository for User
 
-ENVIRONMENT VARIABLES (for production):
-- SPRING_DATASOURCE_URL
-- SPRING_DATASOURCE_USERNAME
-- SPRING_DATASOURCE_PASSWORD
-- SERVER_PORT
-- JAVA_OPTS
+  security/
+    AuthorizationInterceptor.java    MVC interceptor for role-based path auth
+    CustomUserDetailsService.java    Loads UserDetails from DB
+    RolePermissionMapping.java       Path → allowed-roles mapping
 
-================================================================================
-                         NEXT STEPS
-================================================================================
+  service/
+    AuthService.java             Business logic: register, login, getUserById
 
-1. DEVELOPMENT:
-   □ Import project into Eclipse IDE
-   □ Run: mvn clean install
-   □ Start PostgreSQL database
-   [] Execute init-database.sql (includes Spring Session JDBC tables)
-   [] Update application.properties
-   □ Run: mvn spring-boot:run
-
-2. TESTING:
-   □ Import Postman collection
-   □ Test health endpoint
-   □ Test user registration
-   □ Test login/logout flow
-   □ Test protected endpoints
-   □ Test role-based access
-
-3. PRODUCTION:
-   □ Update CORS origins
-   □ Enable HTTPS (set server.ssl.enabled=true)
-   □ Configure production database
-   [] Configure production database
-   [] Set environment variables
-   □ Build JAR: mvn clean package
-   □ Deploy Docker container or Java app
-
-4. ENHANCEMENTS (Optional):
-   □ Add API documentation with Swagger/SpringFox
-   □ Add email verification for registration
-   □ Add password reset functionality
-   □ Add 2FA authentication
-   □ Add audit logging
-   □ Add caching layer
-   □ Add pagination for list endpoints
-   □ Add rate limiting
+  util/
+    SecurityUtil.java            Client IP detection
+    SecurityUtils.java           Static helpers: getCurrentUser(), hasRole()
 
 ================================================================================
-                         SUPPORT & TROUBLESHOOTING
+  ROLE PERMISSION MATRIX
 ================================================================================
 
-COMMON ISSUES:
-
-1. Database Connection Failed
-   - Ensure PostgreSQL is running
-   - Check credentials in application.properties
-   - Verify database secureapp_db exists
-   - Run: psql -U postgres -h localhost -d secureapp_db
-
-2. Session Tables Missing
-   - Ensure SPRING_SESSION and SPRING_SESSION_ATTRIBUTES tables exist
-   - Run init-database.sql to create them
-   - Check spring.session.store-type=jdbc in application.properties
-
-3. Port 8080 Already in Use
-   - Change server.port in application.properties
-   - Or kill existing process on port 8080
-
-4. Maven Build Errors
-   - Clear cache: mvn clean -U install
-   - Update dependencies: mvn dependency:update-snapshots
-   - Check Java version: java -version (should be 21)
-
-5. Session Not Persisting
-   - Verify SPRING_SESSION tables exist in database
-   - Check spring.session.store-type=jdbc in application.properties
-   - Ensure spring.session.jdbc.initialize-schema=never (tables created by init-database.sql)
-
-For detailed documentation, see: README.md
+  Path Pattern            ROLE_USER    ROLE_ADMIN    Notes
+  ─────────────────────────────────────────────────────────────────
+  /auth/login             Public       Public        No auth required
+  /auth/register          Public       Public        No auth required
+  /auth/logout            Public       Public        No auth required
+  /health                 Public       Public        No auth required
+  /dashboard/**           Allowed      Allowed       Any authenticated user
+  /admin/**               Denied       Allowed       Admin only
+  /activity/admin/**      Denied       Allowed       Admin only
+  /activity/profile/**    Allowed      Allowed       User + Admin
+  /activity/action/**     Allowed      Allowed       User + Admin
 
 ================================================================================
-                         VERSION INFORMATION
+  DATABASE
 ================================================================================
 
-Project Version: 1.0.0
-Spring Boot Version: 4.0.3
-Java Version: 21
-Maven Version: 3.9.12+
-PostgreSQL Driver: 42.7.3
-Creation Date: March 10, 2026
-Status: Production Ready
+  PostgreSQL:  localhost:5432 / secureapp_db
+  Credentials: postgres / postgres
+
+  Tables:
+    roles                    Role definitions
+    users                    User accounts
+    user_roles               User ↔ Role junction
+    SPRING_SESSION           JDBC session storage
+    SPRING_SESSION_ATTRIBUTES Session attributes (incl. DPoP keys)
+
+  Initialize: psql -U postgres -d secureapp_db -f init-database.sql
 
 ================================================================================
-                         PROJECT DELIVERY COMPLETE
+  DEFAULT TEST CREDENTIALS
 ================================================================================
 
-All required components have been created and are ready for deployment.
+  Admin:     admin    / AdminPass123!  (ROLE_ADMIN, ROLE_USER)
+  Test User: testuser / UserPass123!   (ROLE_USER)
 
-The SecureApp backend provides:
-✓ Secure session-based authentication
-✓ Comprehensive authorization with role-based access control
-✓ Production-grade security configurations
-✓ RESTful API endpoints with proper error handling
-✓ PostgreSQL database integration
-✓ JDBC session storage (PostgreSQL)
-✓ Complete documentation
-✓ Database initialization scripts
-✓ Postman API test collection
-✓ Maven build configuration
-✓ Ready to deploy
+================================================================================
+  FILES
+================================================================================
 
-Location: E:\Projects\Agristack\poc\SecureDemo
+  README.md                          Detailed documentation
+  ARCHITECTURE.md                    System architecture diagrams
+  PROJECT_SUMMARY.txt                This file — quick reference
+  SecureApp-API.postman_collection.json  Postman test collection with DPoP scripts
+  init-database.sql                  Database initialization script
+  pom.xml                            Maven build configuration
 
 ================================================================================

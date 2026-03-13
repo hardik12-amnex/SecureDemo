@@ -2,6 +2,7 @@ package com.example.secureapp.config;
 
 import java.util.Arrays;
 
+import com.example.secureapp.dpop.DPoPAuthenticationFilter;
 import com.example.secureapp.filter.SessionValidationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -26,9 +27,12 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 public class SecurityConfig {
 
     private final SessionValidationFilter sessionValidationFilter;
+    private final DPoPAuthenticationFilter dpopAuthenticationFilter;
 
-    public SecurityConfig(SessionValidationFilter sessionValidationFilter) {
+    public SecurityConfig(SessionValidationFilter sessionValidationFilter,
+                          DPoPAuthenticationFilter dpopAuthenticationFilter) {
         this.sessionValidationFilter = sessionValidationFilter;
+        this.dpopAuthenticationFilter = dpopAuthenticationFilter;
     }
 
     /**
@@ -57,10 +61,10 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(Arrays.asList("http://localhost:4200"));
         // Allow standard HTTP methods
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        // Allow all headers
+        // Allow all headers (includes DPoP custom header)
         configuration.setAllowedHeaders(Arrays.asList("*"));
-        // Expose headers for client-side access
-        configuration.setExposedHeaders(Arrays.asList("Authorization", "Content-Type"));
+        // Expose headers for client-side access (DPoP included for proof-of-possession flow)
+        configuration.setExposedHeaders(Arrays.asList("Authorization", "Content-Type", "DPoP"));
         // Enable credentials (cookies, HTTP authentication, etc.)
         configuration.setAllowCredentials(true);
         // Set max age for preflight cache
@@ -83,6 +87,12 @@ public class SecurityConfig {
             
             // Enable CSRF protection using CookieCsrfTokenRepository
             .csrf(csrf -> csrf
+            		.ignoringRequestMatchers(
+                            "/auth/login",
+                            "/auth/register",
+                            "/auth/logout",
+                            "/health"
+                        )
                 .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
             )
             
@@ -106,9 +116,13 @@ public class SecurityConfig {
                 .rolePrefix("ROLE_")
             )
             
-            // Register SessionValidationFilter before UsernamePasswordAuthenticationFilter
-            // This ensures session validity is checked early in the Spring Security filter chain
-            .addFilterBefore(sessionValidationFilter, UsernamePasswordAuthenticationFilter.class)
+            // Register DPoPAuthenticationFilter before UsernamePasswordAuthenticationFilter
+            // This ensures DPoP proof-of-possession is verified early in the filter chain
+            .addFilterBefore(dpopAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+            
+            // Register SessionValidationFilter after DPoP filter but still before UsernamePasswordAuthenticationFilter
+            // This ensures session validity is checked after DPoP verification
+            .addFilterAfter(sessionValidationFilter, DPoPAuthenticationFilter.class)
             
             // Configure authorization rules
             .authorizeHttpRequests(authz -> authz

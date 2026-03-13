@@ -19,10 +19,14 @@ import com.example.secureapp.repository.RoleRepository;
 import com.example.secureapp.repository.UserRepository;
 
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 @RequiredArgsConstructor
 public class AuthService {
+
+    private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
@@ -72,7 +76,16 @@ public class AuthService {
         User user = userRepository.findByUsername(loginRequest.getUsername())
             .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
+        logger.debug("Login attempt for user [{}]. Stored hash starts with: {}",
+                loginRequest.getUsername(),
+                user.getPassword() != null && user.getPassword().length() > 7
+                        ? user.getPassword().substring(0, 7) + "..."
+                        : "NULL/EMPTY");
+
         if (!passwordEncoder.matches(loginRequest.getPassword(), user.getPassword())) {
+            logger.warn("Password mismatch for user [{}]. Stored hash length: {}",
+                    loginRequest.getUsername(),
+                    user.getPassword() != null ? user.getPassword().length() : 0);
             throw new BadRequestException("Invalid credentials");
         }
 
