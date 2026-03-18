@@ -19,9 +19,9 @@ import java.util.Set;
 /**
  * Enterprise-grade Authorization Interceptor.
  *
- * <p>Request flow:
- * Browser → NGINX → Spring Security Filter Chain → SessionValidationFilter
- * → <b>AuthorizationInterceptor</b> → Controller
+ * <p>Request flow (stateless):
+ * Browser → Spring Security Filter Chain → JwtAuthenticationFilter
+ * → DPoPAuthenticationFilter → <b>AuthorizationInterceptor</b> → Controller
  *
  * <p>Responsibilities:
  * <ul>

@@ -1,40 +1,66 @@
 package com.example.secureapp.controller;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.example.secureapp.dpop.DPoPConstants;
 import com.example.secureapp.dpop.DPoPSessionBindingService;
 import com.example.secureapp.dpop.DPoPValidationException;
 import com.example.secureapp.dto.ApiResponse;
 import com.example.secureapp.dto.LoginRequest;
+import com.example.secureapp.dto.LoginResponse;
 import com.example.secureapp.dto.SignUpRequest;
 import com.example.secureapp.dto.UserResponse;
+import com.example.secureapp.filter.JwtAuthenticationFilter;
+import com.example.secureapp.security.JwtTokenService;
 import com.example.secureapp.service.AuthService;
+
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpSession;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContext;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
-import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/auth")
-@RequiredArgsConstructor
 public class AuthController {
 
     private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
 
-    private final AuthService authService;
-    private final DPoPSessionBindingService dpopSessionBindingService;
-    private final UserDetailsService userDetailsService;
+    /** Cookie name for the JWT access token. */
+    public static final String JWT_COOKIE_NAME = "ACCESS_TOKEN";
 
+    private final AuthService authService;
+    private final DPoPSessionBindingService dpopBindingService;
+    private final UserDetailsService userDetailsService;
+    private final JwtTokenService jwtTokenService;
+    private final long jwtExpirationMs;
+
+    public AuthController(AuthService authService,
+                          DPoPSessionBindingService dpopBindingService,
+                          UserDetailsService userDetailsService,
+                          JwtTokenService jwtTokenService,
+                          @Value("${app.security.jwt.expiration-ms}") long jwtExpirationMs) {
+        this.authService = authService;
+        this.dpopBindingService = dpopBindingService;
+        this.userDetailsService = userDetailsService;
+        this.jwtTokenService = jwtTokenService;
+        this.jwtExpirationMs = jwtExpirationMs;
+    }
+
+    /**
+     * Register a new user.
+     */
     @PostMapping("/register")
     public ResponseEntity<ApiResponse<UserResponse>> register(@Valid @RequestBody SignUpRequest signUpRequest) {
         UserResponse userResponse = authService.register(signUpRequest);
@@ -47,39 +73,14 @@ public class AuthController {
     }
 
     /**
-     * Authenticates the user, performs session rotation, and binds the client's DPoP public key.
-     *
-     * <h3>Why is a DPoP header required at login when the user has no session yet?</h3>
-     * <p>The DPoP proof is <b>NOT</b> an auth token — it is a <b>self-signed JWT</b> that
-     * the client creates entirely on its own using the browser's WebCrypto API.
-     * No session, no token, and no server interaction is needed to produce it.</p>
-     *
-     * <p><b>Client-side flow before login:</b></p>
-     * <ol>
-     *   <li>Angular app loads in the browser</li>
-     *   <li>Client generates an ECDSA P-256 keypair locally (WebCrypto: {@code crypto.subtle.generateKey})</li>
-     *   <li>Client builds a JWT with the <b>public key in the header</b></li>
-     *   <li>Client signs the JWT with the <b>private key</b> (proof of possession)</li>
-     *   <li>Client sends: {@code POST /auth/login} with {@code Body: {username, password}}
-     *       and {@code DPoP: <self-signed-jwt>}</li>
-     * </ol>
-     *
-     * <p>The server then validates the proof, extracts the public key, and binds it
-     * to the newly-created session. All subsequent requests must include a fresh DPoP
-     * proof signed by the same private key — this is verified by
-     * {@link com.example.secureapp.dpop.DPoPAuthenticationFilter}.</p>
-     *
-     * <h3>Session Fixation Protection</h3>
-     * <ol>
-     *   <li>Old session (if any) is invalidated</li>
-     *   <li>A brand-new session with a new ID is created</li>
-     *   <li>User attributes and DPoP public key are stored only in the new session</li>
-     * </ol>
+     * Authenticates the user and sets a JWT access token in an HttpOnly cookie
+     * with DPoP key binding.
      */
     @PostMapping("/login")
-    public ResponseEntity<ApiResponse<UserResponse>> login(
+    public ResponseEntity<ApiResponse<LoginResponse>> login(
             @Valid @RequestBody LoginRequest loginRequest,
-            HttpServletRequest request) {
+            HttpServletRequest request,
+            HttpServletResponse httpResponse) {
 
         // ── DPoP: Extract proof from header ─────────────────────────────────
         String dpopProof = request.getHeader(DPoPConstants.DPOP_HEADER);
@@ -90,64 +91,68 @@ public class AuthController {
                     HttpStatus.BAD_REQUEST);
         }
 
+        // ── Authenticate user ───────────────────────────────────────────────
         UserResponse userResponse = authService.login(loginRequest);
 
-        // ── Session Rotation (Session Fixation Protection) ──────────────────
-        // Step 1: Invalidate any existing session to discard attacker-planted session IDs
-        HttpSession oldSession = request.getSession(false);
-        String oldSessionId = (oldSession != null) ? oldSession.getId() : "none";
-        if (oldSession != null) {
-            oldSession.invalidate();
-        }
-
-        // Step 2: Create a brand-new session with a fresh ID
-        HttpSession newSession = request.getSession(true);
-        logger.info("Session rotated on login for user [{}]: oldSessionId={}, newSessionId={}",
-                userResponse.getUsername(), oldSessionId, newSession.getId());
-
-        // Step 3: Store user info in the new session
-        newSession.setAttribute("userId", userResponse.getId());
-        newSession.setAttribute("username", userResponse.getUsername());
-        newSession.setAttribute("roles", userResponse.getRoles());
-
-        // Step 4: Set Authentication in SecurityContext so Spring Security
-        // recognizes the user on subsequent requests
-        UserDetails userDetails = userDetailsService.loadUserByUsername(userResponse.getUsername());
-        UsernamePasswordAuthenticationToken authentication =
-                new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
-        SecurityContext securityContext = SecurityContextHolder.createEmptyContext();
-        securityContext.setAuthentication(authentication);
-        SecurityContextHolder.setContext(securityContext);
-        // Persist SecurityContext in the session so it is restored on future requests
-        newSession.setAttribute(
-                HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, securityContext);
-
-        // ── DPoP: Bind client public key to the new session ─────────────────
+        // ── DPoP: Validate proof and get JWK thumbprint ─────────────────────
+        String dpopThumbprint;
         try {
             String requestUri = request.getRequestURL().toString();
-            dpopSessionBindingService.validateAndBindKey(dpopProof, request.getMethod(), requestUri, newSession);
-            logger.info("DPoP key bound to session for user [{}]", userResponse.getUsername());
+            dpopThumbprint = dpopBindingService.validateAndGetThumbprint(
+                    dpopProof, request.getMethod(), requestUri);
+            logger.info("DPoP proof validated for user [{}]. Thumbprint: {}",
+                    userResponse.getUsername(), dpopThumbprint);
         } catch (DPoPValidationException ex) {
             logger.warn("DPoP proof validation failed during login: {}", ex.getMessage());
-            newSession.invalidate();
             return new ResponseEntity<>(
                     ApiResponse.error("DPoP proof validation failed: " + ex.getMessage(),
                             HttpStatus.UNAUTHORIZED.value()),
                     HttpStatus.UNAUTHORIZED);
         }
-        // ─────────────────────────────────────────────────────────────────────
 
-        ApiResponse<UserResponse> response = ApiResponse.success(
+        // ── Generate JWT access token with DPoP binding ─────────────────────
+        UserDetails userDetails = userDetailsService.loadUserByUsername(userResponse.getUsername());
+        String accessToken = jwtTokenService.generateToken(userDetails, userResponse.getId(), dpopThumbprint);
+
+        logger.info("JWT token generated for user [{}]", userResponse.getUsername());
+
+        // ── Set JWT in HttpOnly cookie ──────────────────────────────────────
+        ResponseCookie jwtCookie = ResponseCookie.from(JWT_COOKIE_NAME, accessToken)
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Strict")
+                .path("/")
+                .maxAge(jwtExpirationMs / 1000)
+                .build();
+        httpResponse.addHeader(HttpHeaders.SET_COOKIE, jwtCookie.toString());
+
+        LoginResponse loginResponse = LoginResponse.builder()
+                .expiresIn(jwtExpirationMs)
+                .user(userResponse)
+                .build();
+
+        ApiResponse<LoginResponse> response = ApiResponse.success(
             "Login successful",
-            userResponse,
+            loginResponse,
             HttpStatus.OK.value()
         );
         return new ResponseEntity<>(response, HttpStatus.OK);
     }
 
+    /**
+     * Logout endpoint. Clears the JWT HttpOnly cookie.
+     */
     @PostMapping("/logout")
-    public ResponseEntity<ApiResponse<?>> logout(HttpSession session) {
-        session.invalidate();
+    public ResponseEntity<ApiResponse<?>> logout(HttpServletResponse httpResponse) {
+        ResponseCookie clearCookie = ResponseCookie.from(JWT_COOKIE_NAME, "")
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Strict")
+                .path("/")
+                .maxAge(0)
+                .build();
+        httpResponse.addHeader(HttpHeaders.SET_COOKIE, clearCookie.toString());
+
         ApiResponse<?> response = ApiResponse.success(
             "Logout successful",
             null,
@@ -156,16 +161,19 @@ public class AuthController {
         return new ResponseEntity<>(response, HttpStatus.OK);
     }
 
+    /**
+     * Get the currently authenticated user's profile.
+     */
     @GetMapping("/me")
-    public ResponseEntity<ApiResponse<UserResponse>> getCurrentUser(HttpSession session) {
-        Long userId = (Long) session.getAttribute("userId");
+    public ResponseEntity<ApiResponse<UserResponse>> getCurrentUser(HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute(JwtAuthenticationFilter.REQUEST_ATTR_USER_ID);
         if (userId == null) {
             return new ResponseEntity<>(
                 ApiResponse.error("User not authenticated", HttpStatus.UNAUTHORIZED.value()),
                 HttpStatus.UNAUTHORIZED
             );
         }
-        
+
         UserResponse userResponse = authService.getUserById(userId);
         ApiResponse<UserResponse> response = ApiResponse.success(
             "User fetched successfully",

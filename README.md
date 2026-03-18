@@ -1,9 +1,9 @@
 # SecureApp — Enterprise-Grade Spring Boot Security Backend
 
-**Version:** 1.0.0  
+**Version:** 2.0.0 (Stateless JWT + HttpOnly Cookie)  
 **Java:** 21  
 **Spring Boot:** 4.0.3  
-**Last Updated:** March 12, 2026
+**Last Updated:** March 17, 2026
 
 ---
 
@@ -27,9 +27,9 @@
 
 ## Overview
 
-SecureApp is a production-grade Spring Boot backend demonstrating enterprise security best practices. It implements **session-based authentication** with **DPoP (Demonstration of Proof-of-Possession)** binding, **JDBC-backed sessions**, **CSRF protection**, **role-based access control**, and comprehensive **security headers**.
+SecureApp is a production-grade Spring Boot backend demonstrating enterprise security best practices. It implements **stateless JWT-based authentication** with **DPoP (Demonstration of Proof-of-Possession)** binding, **role-based access control**, and comprehensive **security headers**.
 
-DPoP ensures that even if a session cookie is stolen, the attacker cannot use it without possessing the client's private cryptographic key.
+The application is **fully stateless** — no server-side sessions are used. The JWT access token is transported in an **HttpOnly, Secure, SameSite=Strict** cookie, making it completely inaccessible to JavaScript (XSS-proof). The browser automatically attaches the cookie on every request. CSRF protection is enabled via `CookieCsrfTokenRepository`. DPoP ensures that even if the cookie/token is somehow intercepted, the attacker cannot use it without possessing the client's private cryptographic key.
 
 ---
 
@@ -40,7 +40,7 @@ DPoP ensures that even if a session cookie is stolen, the attacker cannot use it
 | Language              | Java 21                             |
 | Framework             | Spring Boot 4.0.3                   |
 | Security              | Spring Security 7.x                 |
-| Session Store         | Spring Session JDBC (PostgreSQL)    |
+| Authentication        | JWT (JJWT 0.12.6) — Stateless      |
 | Database              | PostgreSQL                          |
 | DPoP Proof Validation | Nimbus JOSE JWT 10.0.2              |
 | Replay Protection     | Caffeine Cache (in-memory)          |
@@ -56,32 +56,28 @@ DPoP ensures that even if a session cookie is stolen, the attacker cannot use it
 │                        CLIENT (Browser / Angular)                   │
 │  1. Generate ECDSA P-256 keypair (WebCrypto)                       │
 │  2. Build DPoP proof JWT (self-signed with private key)             │
-│  3. Send request with DPoP header + session cookie                  │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-                               ▼
+│  3. Send request with DPoP header + Authorization: Bearer <JWT>     │
+└──────────────────────────────────┬──────────────────────────────────┘
+                                   │
+                                   ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │                      SPRING SECURITY FILTER CHAIN                    │
 │                                                                      │
 │  ┌──────────────────────────┐                                        │
-│  │ DPoPAuthenticationFilter │ ← Validates DPoP proof JWT             │
-│  │  • Parse & verify JWT     │   Checks JWK thumbprint vs session    │
-│  │  • Replay protection (jti)│   Returns 401 if mismatch             │
+│  │ JwtAuthenticationFilter  │ ← Validates JWT token (signature,      │
+│  │  • Parse Bearer token     │   expiry, issuer). Sets SecurityContext│
+│  │  • Extract user + roles   │   Stores dpop_jkt as request attribute│
+│  │  • Set SecurityContext    │   Returns 401 if invalid              │
 │  └───────────┬──────────────┘                                        │
 │              ▼                                                       │
 │  ┌──────────────────────────┐                                        │
-│  │ SessionValidationFilter  │ ← Validates session existence          │
-│  │  • Session exists?        │   Checks expiry, authentication       │
-│  │  • Session expired?       │   Returns 401 if invalid              │
-│  │  • User authenticated?    │                                       │
+│  │ DPoPAuthenticationFilter │ ← Validates DPoP proof JWT             │
+│  │  • Parse & verify JWT     │   Checks JWK thumbprint vs JWT-bound  │
+│  │  • Replay protection (jti)│   thumbprint. Returns 401 if mismatch │
 │  └───────────┬──────────────┘                                        │
 │              ▼                                                       │
 │  ┌──────────────────────────┐                                        │
 │  │ SecurityHeadersFilter    │ ← Adds CSP, HSTS, X-Frame-Options     │
-│  └───────────┬──────────────┘                                        │
-│              ▼                                                       │
-│  ┌──────────────────────────┐                                        │
-│  │ CSRF Filter (Spring)     │ ← CookieCsrfTokenRepository           │
 │  └───────────┬──────────────┘                                        │
 └──────────────┼───────────────────────────────────────────────────────┘
                ▼
@@ -111,22 +107,22 @@ DPoP ensures that even if a session cookie is stolen, the attacker cannot use it
 src/main/java/com/example/secureapp/
 ├── SecureAppApplication.java              # Spring Boot entry point
 ├── config/
-│   ├── SecurityConfig.java                # Spring Security filter chain, CORS, CSRF, session mgmt
-│   ├── SessionConfig.java                 # @EnableJdbcHttpSession (15-min timeout)
+│   ├── SecurityConfig.java                # Spring Security filter chain, CORS, stateless session
 │   └── WebMvcConfig.java                  # Registers AuthorizationInterceptor
 ├── controller/
-│   ├── AuthController.java                # Login (with DPoP binding), register, logout, /auth/me
+│   ├── AuthController.java                # Login (with DPoP + JWT), register, logout, /auth/me
 │   └── DashboardController.java           # /health, /dashboard, /admin/users
 ├── dpop/
 │   ├── DPoPAuthenticationFilter.java      # Filter: validates DPoP proof on every authenticated request
 │   ├── DPoPConstants.java                 # Header names, claim keys, cache config constants
 │   ├── DPoPProofValidator.java            # Parses & validates DPoP proof JWT (RFC 9449)
 │   ├── DPoPReplayProtectionService.java   # Caffeine cache for jti replay protection
-│   ├── DPoPSessionBindingService.java     # Binds client public key to session at login
+│   ├── DPoPSessionBindingService.java     # Validates DPoP proof at login, returns thumbprint for JWT
 │   └── DPoPValidationException.java       # Thrown when DPoP proof fails validation
 ├── dto/
 │   ├── ApiResponse.java                   # Standard response wrapper {success, message, data, statusCode}
 │   ├── LoginRequest.java                  # Login DTO {username, password}
+│   ├── LoginResponse.java                # Login response with JWT token {accessToken, tokenType, expiresIn, user}
 │   ├── SignUpRequest.java                 # Registration DTO with validation
 │   └── UserResponse.java                 # User response DTO
 ├── entity/
@@ -137,14 +133,15 @@ src/main/java/com/example/secureapp/
 │   ├── GlobalExceptionHandler.java        # @RestControllerAdvice — centralized error handling
 │   └── ResourceNotFoundException.java     # 404 Not Found
 ├── filter/
-│   ├── SecurityHeadersFilter.java         # Adds CSP, HSTS, X-Frame-Options, etc.
-│   └── SessionValidationFilter.java       # Validates session + auth on protected endpoints
+│   ├── JwtAuthenticationFilter.java       # Validates JWT token, sets SecurityContext (replaces SessionValidationFilter)
+│   └── SecurityHeadersFilter.java         # Adds CSP, HSTS, X-Frame-Options, etc.
 ├── repository/
 │   ├── RoleRepository.java                # JPA repository for Role
 │   └── UserRepository.java               # JPA repository for User
 ├── security/
 │   ├── AuthorizationInterceptor.java      # MVC interceptor: role-based path authorization
 │   ├── CustomUserDetailsService.java      # Loads UserDetails from DB for Spring Security
+│   ├── JwtTokenService.java              # JWT token generation, validation, claims extraction
 │   └── RolePermissionMapping.java         # Centralized path → allowed-roles mapping
 ├── service/
 │   └── AuthService.java                   # Business logic: register, login, getUserById
@@ -157,23 +154,29 @@ src/main/java/com/example/secureapp/
 
 ## Security Features
 
-### 1. Session-Based Authentication (JDBC-Backed)
-- Sessions stored in PostgreSQL via Spring Session JDBC
-- 15-minute session timeout (configurable)
-- Session fixation protection: session ID rotated on login
-- Maximum 1 concurrent session per user
-- Secure cookie settings: `HttpOnly`, `Secure`, `SameSite=Strict`
+### 1. Stateless JWT-Based Authentication (HttpOnly Cookie)
+- JWT access tokens issued at login, signed with HMAC-SHA512
+- Token contains user identity (sub), roles, userId, and DPoP binding (dpop_jkt)
+- JWT transported in **HttpOnly, Secure, SameSite=Strict** cookie (`ACCESS_TOKEN`)
+  - **HttpOnly** — inaccessible to JavaScript, preventing XSS token theft
+  - **Secure** — only transmitted over HTTPS
+  - **SameSite=Strict** — never sent on cross-site requests
+- 15-minute token expiration (configurable)
+- No server-side sessions — fully stateless and horizontally scalable
+- Browser automatically attaches the cookie on every request
 
 ### 2. DPoP (Demonstration of Proof-of-Possession) — RFC 9449
 - Client generates an ECDSA P-256 keypair locally (browser WebCrypto API)
 - At login, client sends a self-signed DPoP proof JWT with the public key embedded
-- Server validates the proof and binds the public key to the session
+- Server validates the proof and embeds the JWK thumbprint in the JWT access token (`dpop_jkt` claim)
 - Every subsequent request must include a fresh DPoP proof signed by the same private key
-- JWK thumbprint comparison prevents session cookie theft from being useful
+- JWK thumbprint comparison prevents stolen JWT tokens from being useful
 
 ### 3. CSRF Protection
 - Enabled via `CookieCsrfTokenRepository` (cookie-based, `HttpOnly=false` for JS read)
-- All state-changing requests (POST, PUT, DELETE, PATCH) require a valid CSRF token
+- Required because the JWT is transported in an HttpOnly cookie that browsers auto-attach
+- All state-changing requests (POST, PUT, DELETE, PATCH) require a valid `X-XSRF-TOKEN` header
+- Public endpoints (`/auth/login`, `/auth/register`, `/auth/logout`, `/health`) are excluded
 
 ### 4. CORS
 - Allowed origin: `http://localhost:4200` (Angular dev server)
@@ -204,9 +207,9 @@ Every request passes through a Spring MVC interceptor that checks the user's rol
 ## DPoP (Demonstration of Proof-of-Possession)
 
 ### What Problem Does DPoP Solve?
-Standard session cookies can be stolen via XSS, network interception, or browser extensions. DPoP adds a **cryptographic binding** — the client must prove it holds a private key that corresponds to the public key registered at login time.
+Even with the JWT stored in an HttpOnly cookie (safe from XSS), an attacker who intercepts the cookie via network attacks or CSRF bypass could replay it. DPoP adds a **cryptographic binding** — the client must prove it holds a private key that corresponds to the public key registered at login time and embedded in the JWT token.
 
-### How It Works
+### How It Works (Stateless + HttpOnly Cookie)
 
 ```
 LOGIN FLOW:
@@ -219,17 +222,30 @@ LOGIN FLOW:
 4. Client sends: POST /api/auth/login
    Body: { username, password }
    Header: DPoP: <signed-jwt>
-5. Server validates credentials → validates DPoP proof → binds public key to session
+5. Server validates credentials → validates DPoP proof → generates JWT token
+   with dpop_jkt claim set to the public key's JWK thumbprint
+6. Server sets JWT in HttpOnly cookie:
+   Set-Cookie: ACCESS_TOKEN=<jwt>; HttpOnly; Secure; SameSite=Strict; Max-Age=900
+7. Server returns: { expiresIn: 900000, user: {...} }
+   (Token is NOT in the response body — it's in the cookie)
 
 SUBSEQUENT REQUESTS:
 1. Client builds a fresh DPoP proof for the target endpoint
-2. Client sends request with: Cookie: JSESSIONID=xxx + DPoP: <new-proof>
-3. DPoPAuthenticationFilter:
-   a. Parses & verifies the proof JWT signature
+2. Client sends request with:
+   Cookie: ACCESS_TOKEN=<jwt> (auto-attached by browser)
+   DPoP: <new-proof>
+3. JwtAuthenticationFilter:
+   a. Extracts JWT from ACCESS_TOKEN cookie
+   b. Validates JWT token signature, expiry, issuer
+   c. Extracts user identity, roles, dpop_jkt claim
+   d. Sets SecurityContext with authenticated user
+   e. Stores dpop_jkt as request attribute
+4. DPoPAuthenticationFilter:
+   a. Parses & verifies the DPoP proof JWT signature
    b. Validates htm (HTTP method) and htu (request URI)
    c. Checks iat is within 5-minute window
    d. Checks jti uniqueness (replay protection via Caffeine cache)
-   e. Compares JWK thumbprint with session-bound thumbprint
+   e. Compares JWK thumbprint with JWT-bound thumbprint (dpop_jkt)
    f. If all pass → request proceeds; otherwise → 401
 ```
 
@@ -248,10 +264,23 @@ SUBSEQUENT REQUESTS:
   },
   "payload": {
     "htm": "GET",
-    "htu": "http://localhost:8080/api/dashboard",
+    "htu": "http://localhost:8081/api/dashboard",
     "iat": 1741785600,
     "jti": "unique-random-uuid"
   }
+}
+```
+
+### JWT Access Token Structure
+```json
+{
+  "sub": "testuser",
+  "roles": ["ROLE_USER"],
+  "userId": 2,
+  "dpop_jkt": "<base64url-jwk-thumbprint>",
+  "iss": "secureapp",
+  "iat": 1741785600,
+  "exp": 1741786500
 }
 ```
 
@@ -266,7 +295,7 @@ SUBSEQUENT REQUESTS:
 | `htu`                | Must match the full request URI                       |
 | `iat`                | Must be within ±300 seconds of server time            |
 | `jti`                | Must be unique (not seen in the replay cache)         |
-| JWK Thumbprint       | Must match the thumbprint bound to the session        |
+| JWK Thumbprint       | Must match the thumbprint bound to the JWT token      |
 
 ---
 
@@ -275,14 +304,15 @@ SUBSEQUENT REQUESTS:
 ### Public Endpoints (No Authentication Required)
 ```
 POST /api/auth/register   → Create new user account
-POST /api/auth/login      → Authenticate + bind DPoP key to session
-POST /api/auth/logout     → Invalidate session
+POST /api/auth/login      → Authenticate + get JWT with DPoP binding
+POST /api/auth/logout     → Client discards JWT token
 GET  /api/health          → Health check
 ```
 
-### Protected Endpoints (Session + DPoP Required)
+### Protected Endpoints (JWT Cookie + DPoP Required)
 ```
-Request → DPoPAuthenticationFilter → SessionValidationFilter
+Request (with ACCESS_TOKEN cookie + DPoP header)
+        → JwtAuthenticationFilter → DPoPAuthenticationFilter
         → AuthorizationInterceptor → Controller
 
 GET  /api/auth/me          → Get current authenticated user
@@ -296,7 +326,7 @@ GET  /api/admin/users      → Admin-only user list (ROLE_ADMIN)
 
 ### Base URL
 ```
-http://localhost:8080/api
+http://localhost:8081/api
 ```
 
 ### Standard Response Format
@@ -315,7 +345,7 @@ http://localhost:8080/api
 {
   "status": "ERROR",
   "message": "Error description",
-  "timestamp": "2026-03-12T10:00:00Z"
+  "timestamp": "2026-03-16T10:00:00Z"
 }
 ```
 
@@ -357,15 +387,15 @@ Create a new user account with the default `ROLE_USER` role.
     "lastName": "User",
     "enabled": true,
     "roles": ["ROLE_USER"],
-    "createdAt": "2026-03-12T10:00:00",
-    "updatedAt": "2026-03-12T10:00:00"
+    "createdAt": "2026-03-16T10:00:00",
+    "updatedAt": "2026-03-16T10:00:00"
   },
   "statusCode": 201
 }
 ```
 
 #### POST /auth/login
-Authenticate the user, rotate session, and bind DPoP public key.
+Authenticate the user and set a JWT access token in an HttpOnly cookie with DPoP key binding.
 
 **Required Headers:**
 - `Content-Type: application/json`
@@ -385,24 +415,29 @@ Authenticate the user, rotate session, and bind DPoP public key.
   "success": true,
   "message": "Login successful",
   "data": {
-    "id": 2,
-    "username": "testuser",
-    "email": "test@example.com",
-    "firstName": "Test",
-    "lastName": "User",
-    "enabled": true,
-    "roles": ["ROLE_USER"],
-    "lastLogin": "2026-03-12T10:00:00"
+    "expiresIn": 900000,
+    "user": {
+      "id": 2,
+      "username": "testuser",
+      "email": "test@example.com",
+      "firstName": "Test",
+      "lastName": "User",
+      "enabled": true,
+      "roles": ["ROLE_USER"],
+      "lastLogin": "2026-03-17T10:00:00"
+    }
   },
   "statusCode": 200
 }
 ```
 
 **Response Headers (set by server):**
-- `Set-Cookie: JSESSIONID=<new-session-id>; Path=/; HttpOnly; Secure; SameSite=Strict`
+- `Set-Cookie: ACCESS_TOKEN=<jwt>; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=900`
+
+> **Note:** The JWT token is NOT in the response body — it is set as an HttpOnly cookie, inaccessible to JavaScript.
 
 #### POST /auth/logout
-Invalidate the current session.
+Logout — clears the JWT HttpOnly cookie.
 
 **Response (200):**
 ```json
@@ -414,12 +449,15 @@ Invalidate the current session.
 }
 ```
 
+**Response Headers:**
+- `Set-Cookie: ACCESS_TOKEN=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`
+
 #### GET /auth/me (Protected)
 Get the currently authenticated user's profile.
 
 **Required Headers:**
+- `Cookie: ACCESS_TOKEN=<jwt>` (automatically attached by browser)
 - `DPoP: <fresh-dpop-proof-jwt>`
-- `Cookie: JSESSIONID=<session-id>`
 
 #### GET /health (Public)
 Health check endpoint — no authentication required.
@@ -451,8 +489,8 @@ Admin-only endpoint.
 
 ### Authorization Enforcement Layers
 1. **Spring Security** (`SecurityConfig`) — `.authorizeHttpRequests()` enforces authentication
-2. **DPoPAuthenticationFilter** — Validates cryptographic proof-of-possession
-3. **SessionValidationFilter** — Validates session existence and attributes
+2. **JwtAuthenticationFilter** — Validates JWT token and sets SecurityContext
+3. **DPoPAuthenticationFilter** — Validates cryptographic proof-of-possession
 4. **AuthorizationInterceptor** — Role-based path authorization via `RolePermissionMapping`
 5. **`@PreAuthorize`** — Method-level security on controller methods
 
@@ -486,8 +524,8 @@ psql -U postgres -d secureapp_db -f init-database.sql
 | `roles`                     | Role definitions (ROLE_USER, ROLE_ADMIN, etc.)   |
 | `users`                     | User accounts with credentials and profile data  |
 | `user_roles`                | Many-to-many junction table for user ↔ role      |
-| `SPRING_SESSION`            | JDBC-backed HTTP sessions                        |
-| `SPRING_SESSION_ATTRIBUTES` | Session attribute storage (incl. DPoP keys)      |
+
+> **Note:** No session tables are needed. The application is fully stateless — authentication state is carried in JWT tokens.
 
 ---
 
@@ -497,13 +535,11 @@ psql -U postgres -d secureapp_db -f init-database.sql
 
 | Property                                    | Value                   | Description                              |
 |---------------------------------------------|-------------------------|------------------------------------------|
-| `server.port`                               | `8080`                  | Application port                         |
+| `server.port`                               | `8081`                  | Application port                         |
 | `server.servlet.context-path`               | `/api`                  | All URLs prefixed with `/api`            |
-| `spring.session.store-type`                 | `jdbc`                  | Sessions stored in PostgreSQL            |
-| `server.servlet.session.timeout`            | `15m`                   | Session timeout                          |
-| `server.servlet.session.cookie.http-only`   | `true`                  | Cookie not accessible via JavaScript     |
-| `server.servlet.session.cookie.secure`      | `true`                  | Cookie sent only over HTTPS              |
-| `server.servlet.session.cookie.same-site`   | `strict`                | CSRF mitigation                          |
+| `app.security.jwt.secret`                   | (base64 key)            | HMAC-SHA512 signing key                  |
+| `app.security.jwt.expiration-ms`            | `900000`                | JWT token expiry (15 min)                |
+| `app.security.jwt.issuer`                   | `secureapp`             | JWT issuer claim                         |
 | `spring.jpa.hibernate.ddl-auto`             | `update`                | Auto-update schema                       |
 | `app.security.dpop.max-proof-age-seconds`   | `300`                   | DPoP proof validity window (5 min)       |
 | `app.security.dpop.jti-cache-max-size`      | `100000`                | Max entries in JTI replay cache          |
@@ -533,7 +569,7 @@ java -jar target/secureapp-1.0.0.jar
 
 ### Verify
 ```bash
-curl http://localhost:8080/api/health
+curl http://localhost:8081/api/health
 ```
 
 Expected response:
@@ -565,9 +601,8 @@ Import `SecureApp-API.postman_collection.json` for a complete API test suite inc
 - Health check tests
 - User registration (success + duplicate validation)
 - Login with DPoP proof generation (pre-request scripts)
-- Session-based protected endpoint access
+- JWT token-based protected endpoint access
 - Role-based authorization tests (USER vs ADMIN)
-- Session invalidation / post-logout verification
 - DPoP validation failure tests
 
 The collection includes **pre-request scripts** that automatically generate ECDSA P-256 keypairs and DPoP proof JWTs for testing.
@@ -578,12 +613,11 @@ The collection includes **pre-request scripts** that automatically generate ECDS
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for detailed visual diagrams covering:
 - High-level system overview (Client → Server → Database)
-- Security filter chain pipeline (9-step request processing)
-- Login flow with DPoP key binding & session creation
-- Authenticated request flow (DPoP + session verification)
+- Security filter chain pipeline (JWT + DPoP request processing)
+- Login flow with DPoP key binding & JWT token generation
+- Authenticated request flow (JWT + DPoP verification)
 - Component dependency diagram
-- Session lifecycle & storage
-- DPoP attack prevention model (5 attack scenarios)
+- DPoP attack prevention model
 - Entity-relationship diagram
 - Technology stack map
 - Security headers response anatomy

@@ -1,11 +1,11 @@
 package com.example.secureapp.dpop;
 
+import com.example.secureapp.filter.JwtAuthenticationFilter;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.servlet.http.HttpSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -20,22 +20,28 @@ import java.util.Set;
 /**
  * DPoP (Demonstration of Proof-of-Possession) Authentication Filter.
  *
- * <p>This filter is placed <b>before</b> {@code UsernamePasswordAuthenticationFilter}
- * in the Spring Security filter chain.  It enforces that every authenticated request
- * carries a valid {@code DPoP} proof JWT whose public key matches the key bound to the
- * current HTTP session at login time.</p>
+ * <p>This filter is placed <b>after</b> {@code JwtAuthenticationFilter}
+ * in the Spring Security filter chain. It enforces that every authenticated request
+ * carries a valid {@code DPoP} proof JWT whose public key matches the key bound
+ * to the JWT access token at login time.</p>
  *
- * <h3>Request flow</h3>
+ * <h3>Request flow (stateless)</h3>
  * <pre>
- * Browser → NGINX → Spring Security → DPoPAuthenticationFilter
- *         → SessionValidationFilter → Controller
+ * Browser → Spring Security → JwtAuthenticationFilter
+ *         → DPoPAuthenticationFilter → Controller
  * </pre>
+ *
+ * <h3>Key binding</h3>
+ * <p>Instead of storing the DPoP JWK thumbprint in a server-side session, the
+ * thumbprint is embedded in the JWT access token as the {@code dpop_jkt} claim
+ * (RFC 9449 §6). The {@code JwtAuthenticationFilter} extracts this claim and
+ * stores it as a request attribute for this filter to verify.</p>
  *
  * <h3>Excluded paths</h3>
  * <p>Login, registration, logout, and health endpoints are excluded because
- * the session does not exist yet (login) or is being destroyed (logout).
+ * the JWT token does not exist yet (login) or is not required (public endpoints).
  * The login endpoint performs its own DPoP handling in the controller to
- * bind the public key to the newly-created session.</p>
+ * generate the JWT with the bound public key thumbprint.</p>
  */
 @Component
 public class DPoPAuthenticationFilter extends OncePerRequestFilter {
@@ -48,7 +54,7 @@ public class DPoPAuthenticationFilter extends OncePerRequestFilter {
 
     /**
      * Paths excluded from DPoP enforcement.
-     * Login is excluded because the session doesn't exist yet — DPoP binding
+     * Login is excluded because the JWT token doesn't exist yet — DPoP binding
      * is handled inside the login controller.
      */
     private static final Set<String> EXCLUDED_PATHS = Set.of(
@@ -108,26 +114,21 @@ public class DPoPAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // ── 5. Verify session-bound public key ─────────────────────────────
-        HttpSession session = request.getSession(false);
-        if (session == null) {
-            logger.warn("DPoP filter: No session found");
-            writeUnauthorizedResponse(response, "Session invalid or expired");
-            return;
-        }
-
-        String storedThumbprint = (String) session.getAttribute(
-                DPoPConstants.SESSION_ATTR_DPOP_JWK_THUMBPRINT);
+        // ── 5. Verify JWT-bound public key (stateless: from request attribute) ──
+        // The JwtAuthenticationFilter extracts the dpop_jkt claim from the JWT
+        // token and stores it as a request attribute.
+        String storedThumbprint = (String) request.getAttribute(
+                JwtAuthenticationFilter.REQUEST_ATTR_DPOP_THUMBPRINT);
         if (storedThumbprint == null) {
-            logger.warn("DPoP filter: No DPoP public key bound to session");
-            writeUnauthorizedResponse(response, "Session not bound to DPoP key");
+            logger.warn("DPoP filter: No DPoP thumbprint found in JWT token");
+            writeUnauthorizedResponse(response, "Token not bound to DPoP key");
             return;
         }
 
         if (!storedThumbprint.equals(validationResult.jwkThumbprint())) {
-            logger.warn("DPoP filter: JWK thumbprint mismatch. Session={}, Proof={}",
+            logger.warn("DPoP filter: JWK thumbprint mismatch. Token={}, Proof={}",
                     storedThumbprint, validationResult.jwkThumbprint());
-            writeUnauthorizedResponse(response, "DPoP proof key does not match session-bound key");
+            writeUnauthorizedResponse(response, "DPoP proof key does not match token-bound key");
             return;
         }
 

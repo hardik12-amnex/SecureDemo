@@ -1,7 +1,7 @@
 package com.example.secureapp.controller;
 
 import com.example.secureapp.dto.ApiResponse;
-import jakarta.servlet.http.HttpSession;
+import com.example.secureapp.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -32,8 +32,8 @@ public class DashboardController {
 
     @GetMapping("/dashboard")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<ApiResponse<?>> dashboard(HttpSession session) {
-        String username = (String) session.getAttribute("username");
+    public ResponseEntity<ApiResponse<?>> dashboard() {
+        String username = SecurityUtils.getCurrentUser().orElse("unknown");
         
         Map<String, Object> data = new HashMap<>();
         data.put("message", "Welcome to dashboard, " + username);

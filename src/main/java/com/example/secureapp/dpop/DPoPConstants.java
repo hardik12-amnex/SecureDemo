@@ -3,8 +3,8 @@ package com.example.secureapp.dpop;
 /**
  * Constants used across the DPoP (Demonstration of Proof-of-Possession) implementation.
  *
- * <p>DPoP binds an asymmetric keypair to an HTTP session so that even if a session
- * cookie is stolen, the attacker cannot forge a valid DPoP proof without the
+ * <p>DPoP binds an asymmetric keypair to a JWT access token so that even if the
+ * token is stolen, the attacker cannot forge a valid DPoP proof without the
  * client's private key.</p>
  */
 public final class DPoPConstants {
@@ -33,12 +33,9 @@ public final class DPoPConstants {
     /** Standard "issued at" claim. */
     public static final String CLAIM_IAT = "iat";
 
-    // ── Session Attributes ─────────────────────────────────────────────────
-    /** Session attribute key storing the JWK thumbprint of the bound public key. */
-    public static final String SESSION_ATTR_DPOP_JWK_THUMBPRINT = "DPOP_JWK_THUMBPRINT";
-
-    /** Session attribute key storing the serialised JWK public key JSON. */
-    public static final String SESSION_ATTR_DPOP_PUBLIC_KEY = "DPOP_PUBLIC_KEY";
+    // ── JWT Token Claims (stateless DPoP binding) ──────────────────────────
+    /** JWT access token claim storing the JWK thumbprint of the bound public key (RFC 9449 §6). */
+    public static final String TOKEN_CLAIM_DPOP_JKT = "dpop_jkt";
 
     // ── Validation Limits ──────────────────────────────────────────────────
     /** Maximum allowed clock skew / proof age in seconds (5 minutes). */

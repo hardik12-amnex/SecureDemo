@@ -3,7 +3,7 @@ package com.example.secureapp.config;
 import java.util.Arrays;
 
 import com.example.secureapp.dpop.DPoPAuthenticationFilter;
-import com.example.secureapp.filter.SessionValidationFilter;
+import com.example.secureapp.filter.JwtAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -26,12 +26,12 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @EnableMethodSecurity(prePostEnabled = true, securedEnabled = true, jsr250Enabled = true)
 public class SecurityConfig {
 
-    private final SessionValidationFilter sessionValidationFilter;
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final DPoPAuthenticationFilter dpopAuthenticationFilter;
 
-    public SecurityConfig(SessionValidationFilter sessionValidationFilter,
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
                           DPoPAuthenticationFilter dpopAuthenticationFilter) {
-        this.sessionValidationFilter = sessionValidationFilter;
+        this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.dpopAuthenticationFilter = dpopAuthenticationFilter;
     }
 
@@ -61,11 +61,11 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(Arrays.asList("http://localhost:4200"));
         // Allow standard HTTP methods
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        // Allow all headers (includes DPoP custom header)
+        // Allow all headers (includes DPoP and Authorization custom headers)
         configuration.setAllowedHeaders(Arrays.asList("*"));
-        // Expose headers for client-side access (DPoP included for proof-of-possession flow)
+        // Expose headers for client-side access (DPoP and Authorization included)
         configuration.setExposedHeaders(Arrays.asList("Authorization", "Content-Type", "DPoP"));
-        // Enable credentials (cookies, HTTP authentication, etc.)
+        // Enable credentials (Authorization headers)
         configuration.setAllowCredentials(true);
         // Set max age for preflight cache
         configuration.setMaxAge(3600L);
@@ -76,8 +76,17 @@ public class SecurityConfig {
     }
 
     /**
-     * Configure the security filter chain with session-based authentication,
-     * CSRF protection, security headers, and authorization rules
+     * Configure the security filter chain with stateless JWT-based authentication,
+     * DPoP proof-of-possession, security headers, and authorization rules.
+     *
+     * <p><b>Stateless architecture with HttpOnly cookie transport:</b></p>
+     * <ul>
+     *   <li>No server-side sessions (SessionCreationPolicy.STATELESS)</li>
+     *   <li>JWT token transported in HttpOnly, Secure, SameSite=Strict cookie</li>
+     *   <li>CSRF protection enabled (CookieCsrfTokenRepository) because cookies
+     *       are auto-attached by browser — CSRF token required for state-changing requests</li>
+     *   <li>JWT token contains user identity, roles, and DPoP key binding</li>
+     * </ul>
      */
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -85,44 +94,37 @@ public class SecurityConfig {
             // Enable CORS with the custom configuration
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             
-            // Enable CSRF protection using CookieCsrfTokenRepository
+            // Enable CSRF protection — required because JWT is transported in an
+            // HttpOnly cookie that the browser automatically attaches to requests.
+            // Public endpoints are excluded from CSRF enforcement.
             .csrf(csrf -> csrf
-            		.ignoringRequestMatchers(
-                            "/auth/login",
-                            "/auth/register",
-                            "/auth/logout",
-                            "/health"
-                        )
+                .ignoringRequestMatchers(
+                    "/auth/login",
+                    "/auth/register",
+                    "/auth/logout",
+                    "/health"
+                )
                 .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
             )
             
-            // Configure session management for session-based authentication
+            // Stateless session management — no server-side sessions.
+            // The cookie carries a self-contained JWT, NOT a session ID.
             .sessionManagement(session -> session
-                // Create session only when required (don't create unnecessarily)
-                .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
-                // Session Fixation Protection: after authentication, the existing
-                // session ID is changed (Servlet 3.1+ changeSessionId) so that an
-                // attacker who knew the pre-login session ID can no longer hijack it.
-                // Flow: oldSessionId → invalidated, newSessionId → generated
-                .sessionFixation(fix -> fix.changeSessionId())
-                // Limit to 1 concurrent session per user
-                .maximumSessions(1)
-                // Don't prevent login, allow new login to replace old session
-                .maxSessionsPreventsLogin(false)
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
             
-            // Configure session cookie settings
+            // Configure role prefix
             .servletApi(servlet -> servlet
                 .rolePrefix("ROLE_")
             )
             
-            // Register DPoPAuthenticationFilter before UsernamePasswordAuthenticationFilter
-            // This ensures DPoP proof-of-possession is verified early in the filter chain
-            .addFilterBefore(dpopAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+            // Register JwtAuthenticationFilter before UsernamePasswordAuthenticationFilter
+            // This extracts and validates the JWT token and sets the SecurityContext
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
             
-            // Register SessionValidationFilter after DPoP filter but still before UsernamePasswordAuthenticationFilter
-            // This ensures session validity is checked after DPoP verification
-            .addFilterAfter(sessionValidationFilter, DPoPAuthenticationFilter.class)
+            // Register DPoPAuthenticationFilter after JWT filter
+            // This validates the DPoP proof and compares the JWK thumbprint with the JWT-bound thumbprint
+            .addFilterAfter(dpopAuthenticationFilter, JwtAuthenticationFilter.class)
             
             // Configure authorization rules
             .authorizeHttpRequests(authz -> authz
@@ -149,15 +151,8 @@ public class SecurityConfig {
                 .frameOptions(frame -> frame.deny())
             )
             
-            // Configure logout
-            .logout(logout -> logout
-                .logoutUrl("/auth/logout")
-                .logoutSuccessUrl("/auth/login")
-                .deleteCookies("JSESSIONID")
-                .invalidateHttpSession(true)
-                .clearAuthentication(true)
-                .permitAll()
-            );
+            // Disable default logout (handled manually in AuthController)
+            .logout(logout -> logout.disable());
 
         return http.build();
     }

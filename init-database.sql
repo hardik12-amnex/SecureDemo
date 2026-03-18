@@ -67,45 +67,16 @@ CREATE INDEX idx_user_roles_user_id ON user_roles(user_id);
 CREATE INDEX idx_user_roles_role_id ON user_roles(role_id);
 
 -- =============================================================================
--- SPRING SESSION TABLES (for Spring Session JDBC 4.0.2 — Spring Boot 4.0.3)
+-- NOTE: SPRING_SESSION tables are NO LONGER required.
 -- =============================================================================
--- Schema must match the official Spring Session JDBC 4.0.2 PostgreSQL schema
--- shipped inside spring-session-jdbc-4.0.2.jar (schema-postgresql.sql).
--- Key change from older versions: column is LAST_ACCESS_TIME (not LAST_ACCESSED_TIME).
+-- The application now uses stateless JWT-based authentication.
+-- Authentication state is carried in the JWT access token (Authorization header),
+-- not in server-side sessions. No session tables are needed.
 --
--- Session attributes stored by the application:
---   userId              — authenticated user's ID
---   username            — authenticated user's username
---   roles               — authenticated user's role names
---   DPOP_JWK_THUMBPRINT — JWK thumbprint of the DPoP-bound public key
---   DPOP_PUBLIC_KEY     — serialised JWK public key JSON (for auditing)
+-- If upgrading from the session-based version, you can safely drop the old tables:
+--   DROP TABLE IF EXISTS SPRING_SESSION_ATTRIBUTES;
+--   DROP TABLE IF EXISTS SPRING_SESSION;
 -- =============================================================================
-
-DROP TABLE IF EXISTS SPRING_SESSION_ATTRIBUTES;
-DROP TABLE IF EXISTS SPRING_SESSION;
-
-CREATE TABLE SPRING_SESSION (
-    PRIMARY_ID CHAR(36) NOT NULL,
-    SESSION_ID CHAR(36) NOT NULL,
-    CREATION_TIME BIGINT NOT NULL,
-    LAST_ACCESS_TIME BIGINT NOT NULL,
-    MAX_INACTIVE_INTERVAL INT NOT NULL,
-    EXPIRY_TIME BIGINT NOT NULL,
-    PRINCIPAL_NAME VARCHAR(100),
-    CONSTRAINT SPRING_SESSION_PK PRIMARY KEY (PRIMARY_ID)
-);
-
-CREATE UNIQUE INDEX SPRING_SESSION_IX1 ON SPRING_SESSION (SESSION_ID);
-CREATE INDEX SPRING_SESSION_IX2 ON SPRING_SESSION (EXPIRY_TIME);
-CREATE INDEX SPRING_SESSION_IX3 ON SPRING_SESSION (PRINCIPAL_NAME);
-
-CREATE TABLE SPRING_SESSION_ATTRIBUTES (
-    SESSION_PRIMARY_ID CHAR(36) NOT NULL,
-    ATTRIBUTE_NAME VARCHAR(200) NOT NULL,
-    ATTRIBUTE_BYTES BYTEA NOT NULL,
-    CONSTRAINT SPRING_SESSION_ATTRIBUTES_PK PRIMARY KEY (SESSION_PRIMARY_ID, ATTRIBUTE_NAME),
-    CONSTRAINT SPRING_SESSION_ATTRIBUTES_FK FOREIGN KEY (SESSION_PRIMARY_ID) REFERENCES SPRING_SESSION(PRIMARY_ID) ON DELETE CASCADE
-);
 
 -- =============================================================================
 -- INITIAL DATA

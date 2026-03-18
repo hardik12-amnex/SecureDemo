@@ -1,6 +1,6 @@
 # SecureApp — System Architecture Diagram
 
-> **Version:** 1.0.0 | **Spring Boot:** 4.0.3 | **Java:** 21 | **Date:** March 12, 2026
+> **Version:** 2.0.0 (Stateless JWT + HttpOnly Cookie) | **Spring Boot:** 4.0.3 | **Java:** 21 | **Date:** March 17, 2026
 
 ---
 
@@ -18,8 +18,8 @@
 │   │   │  ──────────────  │   │  ──────────────  │   │  ──────────────  │    │   │
 │   │   │ • Generate ECDSA │──▶│ • Build proof JWT│──▶│ • Attach DPoP   │    │   │
 │   │   │   P-256 keypair  │   │ • Sign with      │   │   header        │    │   │
-│   │   │ • Store private  │   │   private key    │   │ • Attach session│    │   │
-│   │   │   key in memory  │   │ • Fresh jti/iat  │   │   cookie        │    │   │
+│   │   │ • Store private  │   │   private key    │   │ • Attach Bearer │    │   │
+│   │   │   key in memory  │   │ • Fresh jti/iat  │   │   cookie (auto) │    │   │
 │   │   └──────────────────┘   └──────────────────┘   └────────┬───────┘    │   │
 │   │                                                           │            │   │
 │   └───────────────────────────────────────────────────────────┼────────────┘   │
@@ -27,65 +27,61 @@
 └───────────────────────────────────────────────────────────────┼─────────────────┘
                                                                 │
                       HTTPS (Port 8080)                         │
-                      Cookie: JSESSIONID=xxx                    │
+                      Cookie: ACCESS_TOKEN=<jwt> (HttpOnly)     │
                       Header: DPoP: <signed-jwt>                │
                                                                 ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                          SERVER LAYER (Spring Boot 4.0.3)                        │
 │                          Context Path: /api                                     │
+│                          Session Policy: STATELESS (no server-side sessions)    │
 │                                                                                 │
 │   ┌─────────────────────────────────────────────────────────────────────────┐   │
 │   │                    SECURITY FILTER CHAIN                                │   │
 │   │                    (See Section 2 for details)                          │   │
-│   └─────────────────────────────────────┬───────────────────────────────────┘   │
-│                                         │                                       │
-│   ┌─────────────────────────────────────▼───────────────────────────────────┐   │
+│   └─────────────────────────────────┬───────────────────────────────────────┘   │
+│                                     │                                           │
+│   ┌─────────────────────────────────▼───────────────────────────────────────┐   │
 │   │                    MVC INTERCEPTOR CHAIN                                │   │
 │   │                    AuthorizationInterceptor                             │   │
-│   └─────────────────────────────────────┬───────────────────────────────────┘   │
-│                                         │                                       │
-│   ┌─────────────────────────────────────▼───────────────────────────────────┐   │
+│   └─────────────────────────────────┬───────────────────────────────────────┘   │
+│                                     │                                           │
+│   ┌─────────────────────────────────▼───────────────────────────────────────┐   │
 │   │                    CONTROLLER LAYER                                     │   │
 │   │    AuthController          DashboardController                          │   │
-│   └─────────────────────────────────────┬───────────────────────────────────┘   │
-│                                         │                                       │
-│   ┌─────────────────────────────────────▼───────────────────────────────────┐   │
+│   └─────────────────────────────────┬───────────────────────────────────────┘   │
+│                                     │                                           │
+│   ┌─────────────────────────────────▼───────────────────────────────────────┐   │
 │   │                    SERVICE LAYER                                        │   │
-│   │    AuthService         DPoPSessionBindingService                        │   │
-│   └─────────────────────────────────────┬───────────────────────────────────┘   │
-│                                         │                                       │
-│   ┌─────────────────────────────────────▼───────────────────────────────────┐   │
+│   │    AuthService         JwtTokenService         DPoPSessionBindingService│   │
+│   └─────────────────────────────────┬───────────────────────────────────────┘   │
+│                                     │                                           │
+│   ┌─────────────────────────────────▼───────────────────────────────────────┐   │
 │   │                    REPOSITORY / DATA LAYER                              │   │
 │   │    UserRepository          RoleRepository                               │   │
-│   └─────────────────────────────────────┬───────────────────────────────────┘   │
-│                                         │                                       │
-└─────────────────────────────────────────┼───────────────────────────────────────┘
-                                          │
-                                          │  JDBC
-                                          ▼
+│   └─────────────────────────────────┬───────────────────────────────────────┘   │
+│                                     │                                           │
+└─────────────────────────────────────┼───────────────────────────────────────────┘
+                                      │
+                                      │  JDBC
+                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                          DATA LAYER (PostgreSQL :5432)                           │
 │                          Database: secureapp_db                                 │
 │                                                                                 │
-│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
-│   │    users      │  │    roles     │  │  user_roles   │  │ SPRING_SESSION   │   │
-│   │  ──────────── │  │  ────────── │  │  ──────────── │  │ ──────────────── │   │
-│   │ id           │  │ id           │  │ user_id  (FK) │  │ PRIMARY_ID       │   │
-│   │ username     │  │ name         │  │ role_id  (FK) │  │ SESSION_ID       │   │
-│   │ email        │  │ description  │  └──────────────┘  │ EXPIRY_TIME      │   │
-│   │ password     │  │ created_at   │                     │ PRINCIPAL_NAME   │   │
-│   │  (BCrypt-12) │  │ updated_at   │                     └────────┬─────────┘   │
-│   │ first_name   │  └──────────────┘                              │             │
-│   │ last_name    │                                     ┌──────────▼─────────┐   │
-│   │ enabled      │                                     │ SPRING_SESSION_    │   │
-│   │ created_at   │                                     │    ATTRIBUTES      │   │
-│   │ last_login   │                                     │ ──────────────────│   │
-│   └──────────────┘                                     │ SESSION_PRIMARY_ID│   │
-│                                                        │ ATTRIBUTE_NAME    │   │
-│                                                        │ ATTRIBUTE_BYTES   │   │
-│                                                        │  (DPoP keys,     │   │
-│                                                        │   user attrs)    │   │
-│                                                        └──────────────────┘   │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                         │
+│   │    users      │  │    roles     │  │  user_roles   │                         │
+│   │  ──────────── │  │  ────────── │  │  ──────────── │                         │
+│   │ id           │  │ id           │  │ user_id  (FK) │                         │
+│   │ username     │  │ name         │  │ role_id  (FK) │                         │
+│   │ email        │  │ description  │  └──────────────┘                         │
+│   │ password     │  │ created_at   │                                            │
+│   │  (BCrypt-12) │  │ updated_at   │  No session tables needed!                │
+│   │ first_name   │  └──────────────┘  (Stateless JWT architecture)             │
+│   │ last_name    │                                                              │
+│   │ enabled      │                                                              │
+│   │ created_at   │                                                              │
+│   │ last_login   │                                                              │
+│   └──────────────┘                                                              │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -97,8 +93,9 @@
                             ┌──────────────────┐
                             │  INCOMING REQUEST │
                             │  GET /api/dashboard│
-                            │  Cookie: JSESSIONID│
-                            │  DPoP: <jwt>       │
+                            │  Cookie:           │
+                            │    ACCESS_TOKEN=jwt│
+                            │  DPoP: <proof-jwt> │
                             └────────┬───────────┘
                                      │
               ┌──────────────────────▼──────────────────────┐
@@ -106,19 +103,35 @@
               │  ──────────────────────────────────────────  │
               │  • Validates Origin: http://localhost:4200   │
               │  • Handles preflight OPTIONS requests        │
-              │  • Exposes DPoP header to client             │
+              │  • Exposes DPoP & Authorization headers      │
               │  ✗ Origin not allowed → 403 Forbidden        │
               └──────────────────────┬──────────────────────┘
                                      │ ✓ CORS OK
               ┌──────────────────────▼──────────────────────┐
-              │          ② CSRF Filter (Spring)             │
+              │          CSRF Filter (Spring)               │
               │  ──────────────────────────────────────────  │
               │  • CookieCsrfTokenRepository (HttpOnly=off) │
               │  • Validates X-XSRF-TOKEN on POST/PUT/DELETE │
               │  • GET requests skip CSRF check              │
+              │  • Public endpoints excluded                 │
               │  ✗ Missing/invalid CSRF → 403 Forbidden      │
               └──────────────────────┬──────────────────────┘
                                      │ ✓ CSRF OK
+              ┌──────────────────────▼──────────────────────┐
+              │     ② JwtAuthenticationFilter [CUSTOM]      │
+              │  ──────────────────────────────────────────  │
+              │  Excluded: /auth/login, /auth/register,     │
+              │            /auth/logout, /health             │
+              │                                              │
+              │  Step 1: Extract JWT from ACCESS_TOKEN cookie│
+              │  Step 2: Validate JWT signature (HMAC-SHA512)│
+              │  Step 3: Validate expiry and issuer          │
+              │  Step 4: Extract sub, roles, userId, dpop_jkt│
+              │  Step 5: Set Authentication in SecurityContext│
+              │  Step 6: Store dpop_jkt as request attribute │
+              │  ✗ Any failure → 401 JSON response           │
+              └──────────────────────┬──────────────────────┘
+                                     │ ✓ JWT Valid
               ┌──────────────────────▼──────────────────────┐
               │     ③ DPoPAuthenticationFilter [CUSTOM]     │
               │  ──────────────────────────────────────────  │
@@ -132,25 +145,13 @@
               │  Step 5: Validate htu (request URI)          │
               │  Step 6: Validate iat (within ±300s)         │
               │  Step 7: Check jti uniqueness (Caffeine)     │
-              │  Step 8: Compare JWK thumbprint vs session   │
+              │  Step 8: Compare JWK thumbprint vs JWT-bound │
+              │          dpop_jkt (from request attribute)   │
               │  ✗ Any failure → 401 JSON response           │
               └──────────────────────┬──────────────────────┘
                                      │ ✓ DPoP Valid
               ┌──────────────────────▼──────────────────────┐
-              │     ④ SessionValidationFilter [CUSTOM]      │
-              │  ──────────────────────────────────────────  │
-              │  Excluded: /auth/login, /auth/register,     │
-              │            /auth/logout, /health             │
-              │                                              │
-              │  Step 1: Session exists? (getSession(false)) │
-              │  Step 2: Session expired? (time-based check) │
-              │  Step 3: SecurityContext has auth user?       │
-              │  Step 4: Session has "username" attribute?    │
-              │  ✗ Any failure → 401 JSON response           │
-              └──────────────────────┬──────────────────────┘
-                                     │ ✓ Session Valid
-              ┌──────────────────────▼──────────────────────┐
-              │     ⑤ SecurityHeadersFilter [CUSTOM]        │
+              │     ④ SecurityHeadersFilter [CUSTOM]        │
               │  ──────────────────────────────────────────  │
               │  Adds to EVERY response:                     │
               │  • Content-Security-Policy                   │
@@ -164,20 +165,20 @@
               └──────────────────────┬──────────────────────┘
                                      │
               ┌──────────────────────▼──────────────────────┐
-              │     ⑥ Spring Security Authorization         │
+              │     ⑤ Spring Security Authorization         │
               │  ──────────────────────────────────────────  │
               │  .authorizeHttpRequests:                      │
               │    /auth/login, /auth/register → permitAll() │
               │    /auth/logout, /health      → permitAll() │
               │    /** (everything else)       → authenticated│
-              │  ✗ Not authenticated → 401 / redirect        │
+              │  ✗ Not authenticated → 401                   │
               └──────────────────────┬──────────────────────┘
                                      │ ✓ Authenticated
         ═════════════════════════════╪═══════════════════════════
                   FILTER CHAIN END │  MVC INTERCEPTOR CHAIN START
         ═════════════════════════════╪═══════════════════════════
               ┌──────────────────────▼──────────────────────┐
-              │     ⑦ AuthorizationInterceptor [CUSTOM]     │
+              │     ⑥ AuthorizationInterceptor [CUSTOM]     │
               │  ──────────────────────────────────────────  │
               │  Excluded: /auth/*, /health, /error          │
               │                                              │
@@ -199,7 +200,7 @@
               └──────────────────────┬──────────────────────┘
                                      │ ✓ Authorized
               ┌──────────────────────▼──────────────────────┐
-              │     ⑧ @PreAuthorize (Method Security)       │
+              │     ⑦ @PreAuthorize (Method Security)       │
               │  ──────────────────────────────────────────  │
               │  • @PreAuthorize("isAuthenticated()")        │
               │  • @PreAuthorize("hasRole('ADMIN')")         │
@@ -207,7 +208,7 @@
               └──────────────────────┬──────────────────────┘
                                      │ ✓ Authorized
               ┌──────────────────────▼──────────────────────┐
-              │          ⑨ CONTROLLER METHOD                │
+              │          ⑧ CONTROLLER METHOD                │
               │  ──────────────────────────────────────────  │
               │  • Process business logic                    │
               │  • Return ApiResponse<T> JSON                │
@@ -217,14 +218,12 @@
                             │  HTTP RESPONSE      │
                             │  200 OK / JSON body  │
                             │  + Security headers  │
-                            │  + Set-Cookie (if    │
-                            │    session created)  │
                             └──────────────────────┘
 ```
 
 ---
 
-## 3. Login Flow — DPoP Key Binding & Session Creation
+## 3. Login Flow — DPoP Key Binding & JWT Token Generation
 
 ```
    CLIENT                                              SERVER
@@ -272,13 +271,9 @@
      │                    │     → Update lastLogin timestamp                  │
      │                    │     → Return UserResponse                         │
      │                    │                                                   │
-     │                    │  c. SESSION ROTATION                              │
-     │                    │     → oldSession.invalidate()                     │
-     │                    │     → newSession = request.getSession(true)       │
-     │                    │     → Store userId, username, roles               │
-     │                    │                                                   │
-     │                    │  d. DPoPSessionBindingService                     │
-     │                    │     .validateAndBindKey(proof, method, uri, sess) │
+     │                    │  c. DPoP VALIDATION (stateless)                   │
+     │                    │     DPoPSessionBindingService                     │
+     │                    │     .validateAndGetThumbprint(proof, method, uri) │
      │                    │     → DPoPProofValidator.validate(proof)          │
      │                    │       → Parse JWT                                │
      │                    │       → Verify typ = dpop+jwt                    │
@@ -287,26 +282,41 @@
      │                    │       → Verify signature with public key         │
      │                    │       → Validate htm, htu, iat, jti              │
      │                    │       → Compute JWK Thumbprint                   │
-     │                    │     → Store in session:                           │
-     │                    │       DPOP_PUBLIC_KEY = jwk.toJSON()             │
-     │                    │       DPOP_JWK_THUMBPRINT = thumbprint           │
-     │                    │     → Session persisted to PostgreSQL via JDBC    │
+     │                    │     → Return thumbprint (no session storage)      │
+     │                    │                                                   │
+     │                    │  d. JWT TOKEN GENERATION                          │
+     │                    │     JwtTokenService.generateToken(                │
+     │                    │       userDetails, userId, dpopThumbprint)        │
+     │                    │     → Build JWT with claims:                      │
+     │                    │       sub = username                              │
+     │                    │       roles = [ROLE_USER]                         │
+     │                    │       userId = 2                                  │
+     │                    │       dpop_jkt = <thumbprint>                     │
+     │                    │       iss = "secureapp"                           │
+     │                    │       exp = now + 15 min                          │
+     │                    │     → Sign with HMAC-SHA512                       │
+     │                    │     → Return compact JWT string                   │
      │                    └───────────────────────────────────────────────────┘
      │                                                    │
      │ ◀────────────────────────────────────────────────── │
      │  200 OK                                            │
-     │  Set-Cookie: JSESSIONID=<new-id>;                  │
+     │  Set-Cookie: ACCESS_TOKEN=<jwt>;                   │
      │              Path=/; HttpOnly; Secure;              │
      │              SameSite=Strict; Max-Age=900           │
      │  Body: {                                           │
      │    "success": true,                                │
      │    "message": "Login successful",                  │
-     │    "data": { id, username, email, roles, ... }     │
+     │    "data": {                                       │
+     │      "expiresIn": 900000,                         │
+     │      "user": { id, username, email, roles, ... }  │
+     │    }                                               │
      │  }                                                 │
+     │  (JWT is NOT in body — it's in the HttpOnly cookie)│
      │                                                    │
      │  ┌─────────────────────────────────────────────┐   │
      │  │ 4. Client stores:                           │   │
-     │  │    • JSESSIONID cookie (automatic)           │   │
+     │  │    • ACCESS_TOKEN cookie (automatic by       │   │
+     │  │      browser — HttpOnly, inaccessible to JS) │   │
      │  │    • privateKey in memory (for future proofs)│   │
      │  └─────────────────────────────────────────────┘   │
      │                                                    │
@@ -314,7 +324,7 @@
 
 ---
 
-## 4. Authenticated Request Flow — DPoP + Session Verification
+## 4. Authenticated Request Flow — JWT + DPoP Verification
 
 ```
    CLIENT                                              SERVER
@@ -329,11 +339,21 @@
      │  └─────────────────────────────────────────────┘   │
      │                                                    │
      │  GET /api/dashboard                                │
-     │  Cookie: JSESSIONID=abc123                         │
+     │  Cookie: ACCESS_TOKEN=eyJhbGciOiJIUzUxMiJ9...    │
      │  DPoP: eyJhbGciOi....<new-signed-jwt>              │
      │ ──────────────────────────────────────────────────▶ │
      │                                                    │
      │                    ┌───────────────────────────────────────────────────┐
+     │                    │                                                   │
+     │                    │  ② JwtAuthenticationFilter                        │
+     │                    │  ├── Extract JWT from ACCESS_TOKEN cookie         │
+     │                    │  ├── Validate JWT signature (HMAC-SHA512)         │
+     │                    │  ├── Validate expiry and issuer                   │
+     │                    │  ├── Extract sub="testuser", roles=[ROLE_USER]    │
+     │                    │  ├── Extract dpop_jkt=<thumbprint>               │
+     │                    │  ├── Set Authentication in SecurityContext        │
+     │                    │  └── Store dpop_jkt as request attribute          │
+     │                    │      ✓ JWT Valid → continue chain                 │
      │                    │                                                   │
      │                    │  ③ DPoPAuthenticationFilter                       │
      │                    │  ├── Extract DPoP header                          │
@@ -341,26 +361,19 @@
      │                    │  ├── Validate htm="GET", htu matches URL          │
      │                    │  ├── Validate iat within ±300s                    │
      │                    │  ├── Check jti not in Caffeine cache (replay)     │
-     │                    │  ├── Load session → get stored JWK thumbprint     │
-     │                    │  └── Compare proof thumbprint == stored thumbprint│
+     │                    │  ├── Get dpop_jkt from request attribute          │
+     │                    │  └── Compare proof thumbprint == JWT thumbprint   │
      │                    │      ✓ Match → continue chain                     │
      │                    │      ✗ Mismatch → 401 "key does not match"        │
      │                    │                                                   │
-     │                    │  ④ SessionValidationFilter                        │
-     │                    │  ├── Session exists?                              │
-     │                    │  ├── Session not expired?                         │
-     │                    │  ├── SecurityContext has authenticated user?      │
-     │                    │  └── Session has "username" attribute?            │
-     │                    │      ✓ Valid → continue chain                     │
-     │                    │                                                   │
-     │                    │  ⑦ AuthorizationInterceptor                      │
+     │                    │  ⑥ AuthorizationInterceptor                      │
      │                    │  ├── Path: /dashboard                             │
      │                    │  ├── Allowed: [ROLE_USER, ROLE_ADMIN]             │
      │                    │  ├── User roles: [ROLE_USER]                      │
      │                    │  └── ROLE_USER ∈ allowed? YES                     │
      │                    │      ✓ Authorized → continue                      │
      │                    │                                                   │
-     │                    │  ⑨ DashboardController.dashboard()                │
+     │                    │  ⑧ DashboardController.dashboard()                │
      │                    │  └── Return dashboard data                        │
      │                    └───────────────────────────────────────────────────┘
      │                                                    │
@@ -389,33 +402,36 @@
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              CONFIG LAYER                                   │
 │                                                                             │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────┐  │
-│  │  SecurityConfig   │  │  SessionConfig   │  │     WebMvcConfig         │  │
-│  │  ────────────────│  │  ──────────────  │  │  ────────────────────── │  │
-│  │ • Filter chain   │  │ • @EnableJdbc-   │  │ • Registers             │  │
-│  │ • CORS config    │  │   HttpSession    │  │   AuthorizationInter-   │  │
-│  │ • CSRF config    │  │ • 15-min timeout │  │   ceptor                │  │
-│  │ • Session mgmt   │  └──────────────────┘  │ • Exclude paths:        │  │
-│  │ • Auth rules     │                        │   /auth/*, /health      │  │
-│  │ • Header config  │                        └──────────┬───────────────┘  │
-│  └────────┬─────────┘                                   │                  │
-│           │ registers                                   │ registers        │
-│           ▼                                             ▼                  │
+│  ┌──────────────────┐  ┌──────────────────────────┐                        │
+│  │  SecurityConfig   │  │     WebMvcConfig         │                        │
+│  │  ────────────────│  │  ────────────────────── │                        │
+│  │ • Filter chain   │  │ • Registers             │                        │
+│  │ • CORS config    │  │   AuthorizationInter-   │                        │
+│  │ • CSRF disabled  │  │   ceptor                │                        │
+│  │ • STATELESS      │  │ • Exclude paths:        │                        │
+│  │   sessions       │  │   /auth/*, /health      │                        │
+│  │ • Auth rules     │  └──────────┬───────────────┘                        │
+│  │ • Header config  │             │                                        │
+│  └────────┬─────────┘             │ registers                              │
+│           │ registers             ▼                                        │
+│           ▼                                                                │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
 │  │                         FILTER / INTERCEPTOR LAYER                   │  │
 │  │                                                                      │  │
 │  │  ┌──────────────────────┐  ┌─────────────────────┐                  │  │
-│  │  │DPoPAuthentication-   │  │SessionValidation-   │                  │  │
-│  │  │    Filter             │  │    Filter            │                  │  │
+│  │  │JwtAuthentication-    │  │DPoPAuthentication-   │                  │  │
+│  │  │    Filter             │  │    Filter             │                  │  │
 │  │  │ ──────────────────── │  │ ───────────────────  │                  │  │
 │  │  │ • OncePerRequest     │  │ • OncePerRequest    │                  │  │
-│  │  │ • Before UsernameP.. │  │ • After DPoP filter │                  │  │
+│  │  │ • Before UsernameP.. │  │ • After JWT filter  │                  │  │
 │  │  │ ─────────────────    │  │ ────────────────    │                  │  │
 │  │  │ Uses:                │  │ Uses:               │                  │  │
-│  │  │ • DPoPProofValidator │  │ • SecurityContext    │                  │  │
-│  │  │ • DPoPReplayProtect..│  │ • HttpSession        │                  │  │
-│  │  │ • HttpSession        │  └─────────────────────┘                  │  │
-│  │  └──────────┬───────────┘                                            │  │
+│  │  │ • JwtTokenService    │  │ • DPoPProofValidator │                  │  │
+│  │  │ Sets:                │  │ • DPoPReplayProtect..│                  │  │
+│  │  │ • SecurityContext    │  │ • Request attribute  │                  │  │
+│  │  │ • Request attributes │  │   (dpop_jkt)        │                  │  │
+│  │  └──────────┬───────────┘  └─────────────────────┘                  │  │
+│  │             │                                                        │  │
 │  │             │                 ┌────────────────────────┐              │  │
 │  │             │                 │SecurityHeadersFilter   │              │  │
 │  │             │                 │ ──────────────────── │              │  │
@@ -437,32 +453,35 @@
                  │                             │
                  ▼                             ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                            DPoP LAYER                                        │
+│                          SECURITY / JWT / DPoP LAYER                         │
 │                                                                              │
 │  ┌────────────────────────┐  ┌────────────────────────────────────────────┐  │
-│  │  DPoPProofValidator    │  │  DPoPSessionBindingService                 │  │
+│  │  JwtTokenService       │  │  DPoPProofValidator                        │  │
 │  │  ──────────────────── │  │  ──────────────────────────────────────── │  │
-│  │  • Parse JWT           │  │  • Called at login                        │  │
-│  │  • Verify typ, alg     │  │  • Validates proof via DPoPProofValidator │  │
-│  │  • Verify ES256 sig    │  │  • Stores in session:                    │  │
-│  │  • Validate htm, htu   │  │    - DPOP_PUBLIC_KEY (JWK JSON)          │  │
-│  │  • Validate iat, jti   │  │    - DPOP_JWK_THUMBPRINT                 │  │
-│  │  • Compute thumbprint  │  └────────────────────────────────────────────┘  │
-│  └────────────────────────┘                                                  │
+│  │  • Generate JWT        │  │  • Parse JWT                              │  │
+│  │  • Sign HMAC-SHA512    │  │  • Verify typ, alg                        │  │
+│  │  • Validate token      │  │  • Verify ES256 sig                       │  │
+│  │  • Extract claims      │  │  • Validate htm, htu                      │  │
+│  │  • Embed dpop_jkt      │  │  • Validate iat, jti                      │  │
+│  └────────────────────────┘  │  • Compute thumbprint                     │  │
+│                              └────────────────────────────────────────────┘  │
 │                                                                              │
 │  ┌────────────────────────┐  ┌────────────────────────────────────────────┐  │
-│  │DPoPReplayProtection-   │  │  DPoPConstants                            │  │
-│  │    Service              │  │  ──────────────────────────────────────── │  │
-│  │ ──────────────────── │  │  • DPOP_HEADER = "DPoP"                    │  │
-│  │ • Caffeine cache      │  │  • DPOP_TOKEN_TYPE = "dpop+jwt"            │  │
-│  │ • 100K entries max    │  │  • MAX_PROOF_AGE = 300s                    │  │
-│  │ • 300s TTL per jti    │  │  • JTI_CACHE_MAX_SIZE = 100K              │  │
-│  │ • isJtiUnique(jti)    │  │  • SESSION_ATTR_DPOP_JWK_THUMBPRINT       │  │
-│  └────────────────────────┘  └────────────────────────────────────────────┘  │
+│  │DPoPSessionBindingService│  │DPoPReplayProtection-                      │  │
+│  │ ──────────────────── │  │    Service                                │  │
+│  │ • Called at login      │  │ ──────────────────────────────────────── │  │
+│  │ • Validates proof      │  │ • Caffeine cache                        │  │
+│  │ • Returns thumbprint   │  │ • 100K entries max                      │  │
+│  │   (for JWT embedding)  │  │ • 300s TTL per jti                      │  │
+│  └────────────────────────┘  │ • isJtiUnique(jti)                      │  │
+│                              └────────────────────────────────────────────┘  │
 │                                                                              │
-│  ┌────────────────────────┐                                                  │
-│  │DPoPValidationException │  Thrown on any validation failure → 401          │
-│  └────────────────────────┘                                                  │
+│  ┌────────────────────────┐  ┌────────────────────────────────────────────┐  │
+│  │DPoPValidationException │  │  DPoPConstants                            │  │
+│  │ → thrown → 401         │  │  • DPOP_HEADER, TOKEN_TYPE, claims        │  │
+│  └────────────────────────┘  │  • TOKEN_CLAIM_DPOP_JKT                   │  │
+│                              │  • MAX_PROOF_AGE = 300s                    │  │
+│                              └────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -477,151 +496,45 @@
 │  │  GET  /auth/me               │  │                                      │  │
 │  │  ──────────────────────────  │  │  Uses:                               │  │
 │  │  Uses:                       │  │  • @PreAuthorize                     │  │
-│  │  • AuthService               │  │  • HttpSession                       │  │
+│  │  • AuthService               │  │  • SecurityUtils (SecurityContext)   │  │
 │  │  • DPoPSessionBindingService │  └──────────────────────────────────────┘  │
-│  │  • HttpSession               │                                            │
+│  │  • JwtTokenService           │                                            │
 │  └──────────────────────────────┘                                            │
 └──────────────────────────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                          SERVICE LAYER                                       │
-│                                                                              │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │  AuthService                                                           │  │
-│  │  ──────────────────────────────────────────────────────────────────── │  │
-│  │  • register(SignUpRequest) → validate, hash password, assign ROLE_USER │  │
-│  │  • login(LoginRequest) → find user, verify BCrypt, check enabled      │  │
-│  │  • getUserById(id) → fetch user, return UserResponse                  │  │
-│  │  • getUserByUsername(username)                                          │  │
-│  │  Uses: UserRepository, RoleRepository, PasswordEncoder (BCrypt-12)    │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
-│                                                                              │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │  CustomUserDetailsService (implements UserDetailsService)              │  │
-│  │  ──────────────────────────────────────────────────────────────────── │  │
-│  │  • loadUserByUsername() → returns Spring Security UserDetails          │  │
-│  │  • Maps User entity + roles → GrantedAuthority objects                │  │
-│  │  Uses: UserRepository                                                 │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                          REPOSITORY LAYER (Spring Data JPA)                  │
-│                                                                              │
-│  ┌──────────────────────────┐  ┌──────────────────────────────────────────┐  │
-│  │  UserRepository          │  │  RoleRepository                          │  │
-│  │  ────────────────────── │  │  ──────────────────────────────────────│  │
-│  │  • findByUsername()      │  │  • findByName()                          │  │
-│  │  • findByEmail()         │  └──────────────────────────────────────────┘  │
-│  │  • existsByUsername()    │                                                │  │
-│  │  • existsByEmail()       │                                                │  │
-│  └──────────────────────────┘                                                │
-└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 6. Session Lifecycle & Storage
-
-```
- ┌─────────────┐                     ┌──────────────────────────────────┐
- │  LOGIN       │                     │  PostgreSQL: SPRING_SESSION      │
- │  POST /auth/ │                     │  + SPRING_SESSION_ATTRIBUTES     │
- │  login       │                     └──────────┬───────────────────────┘
- └──────┬──────┘                                 │
-        │                                        │
-        ▼                                        │
- ┌──────────────────────────────┐                │
- │ 1. Invalidate old session    │   DELETE ──────┤
- │    oldSession.invalidate()   │                │
- └──────────────┬───────────────┘                │
-                │                                │
-                ▼                                │
- ┌──────────────────────────────┐                │
- │ 2. Create new session        │   INSERT ──────┤
- │    request.getSession(true)  │                │
- │    → New JSESSIONID generated│                │
- └──────────────┬───────────────┘                │
-                │                                │
-                ▼                                │
- ┌──────────────────────────────┐                │
- │ 3. Store user attributes     │   INSERT attrs─┤
- │    session.setAttribute:     │                │
- │    • "userId"    → Long      │                │
- │    • "username"  → String    │                │
- │    • "roles"     → Set<Str>  │                │
- └──────────────┬───────────────┘                │
-                │                                │
-                ▼                                │
- ┌──────────────────────────────┐                │
- │ 4. Bind DPoP public key      │   INSERT attrs─┤
- │    session.setAttribute:     │                │
- │    • "DPOP_PUBLIC_KEY"       │                │
- │      → JWK JSON string      │                │
- │    • "DPOP_JWK_THUMBPRINT"   │                │
- │      → Base64URL thumbprint  │                │
- └──────────────┬───────────────┘                │
-                │                                │
-                ▼                                │
- ┌──────────────────────────────┐                │
- │ 5. Set-Cookie sent to client │                │
- │    JSESSIONID=<new-id>       │                │
- │    Path=/; HttpOnly; Secure  │                │
- │    SameSite=Strict           │                │
- │    Max-Age=900 (15 min)      │                │
- └──────────────────────────────┘                │
-                                                 │
- ┌──────────────┐                                │
- │  EACH REQUEST│                                │
- └──────┬───────┘                                │
-        ▼                                        │
- ┌──────────────────────────────┐                │
- │ Server loads session from DB │   SELECT ──────┤
- │ by JSESSIONID cookie value   │                │
- │ → Validates DPoP thumbprint  │                │
- │ → Validates session attrs    │                │
- │ → Updates LAST_ACCESSED_TIME │   UPDATE ──────┤
- └──────────────────────────────┘                │
-                                                 │
- ┌──────────────┐                                │
- │  LOGOUT       │                                │
- │  POST /auth/ │                                │
- │  logout       │                                │
- └──────┬───────┘                                │
-        ▼                                        │
- ┌──────────────────────────────┐                │
- │ session.invalidate()         │   DELETE ──────┘
- │ → Removes from DB            │
- │ → JSESSIONID cookie cleared  │
- │ → DPoP binding destroyed     │
- └──────────────────────────────┘
-```
-
----
-
-## 7. DPoP Proof-of-Possession — Attack Prevention Model
+## 6. DPoP Proof-of-Possession — Attack Prevention Model
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                   ATTACK SCENARIOS & DPoP PROTECTION                     │
 └──────────────────────────────────────────────────────────────────────────┘
 
-  SCENARIO 1: Session Cookie Theft (XSS / Network Sniffing)
-  ──────────────────────────────────────────────────────────
+  SCENARIO 1: JWT Token Theft via XSS
+  ─────────────────────────────────────
   
-    Attacker steals: JSESSIONID=abc123
+    Attacker injects JavaScript to steal the JWT token.
+    
+    ✗ BLOCKED at the browser level!
+    The JWT is in an HttpOnly cookie — JavaScript cannot read it.
+    Even successful XSS cannot extract the token.
+    
+    If attacker somehow intercepts the cookie (e.g., network):
     Attacker sends:  GET /api/dashboard
-                     Cookie: JSESSIONID=abc123
+                     Cookie: ACCESS_TOKEN=<stolen-jwt>
                      (no DPoP header)
     
     ③ DPoPAuthenticationFilter → ✗ BLOCKED
        "Missing DPoP proof header" → 401
     
     ┌─────────────────────────────────────────────┐
-    │ Even with the cookie, the attacker cannot    │
-    │ forge a DPoP proof because they don't have   │
-    │ the client's ECDSA private key (which never  │
-    │ leaves the browser's memory).                │
+    │ 1. HttpOnly cookie prevents XSS token theft. │
+    │ 2. Even with the cookie, the attacker cannot │
+    │    forge a DPoP proof because they don't have│
+    │    the client's ECDSA private key (which never│
+    │    leaves the browser's memory).              │
     └─────────────────────────────────────────────┘
 
 
@@ -642,45 +555,44 @@
     └─────────────────────────────────────────────┘
 
 
-  SCENARIO 3: Stolen Key + Different Session
-  ──────────────────────────────────────────
+  SCENARIO 3: Attacker's Key + Stolen JWT Token
+  ──────────────────────────────────────────────
   
-    Attacker has their OWN keypair and a stolen session cookie.
+    Attacker has their OWN keypair and a stolen JWT token.
     Attacker generates a valid DPoP proof with THEIR key.
     
     ③ DPoPAuthenticationFilter → ✗ BLOCKED
        Step 8: JWK thumbprint mismatch
-       Proof thumbprint ≠ Session-bound thumbprint
-       "DPoP proof key does not match session-bound key" → 401
+       Proof thumbprint ≠ JWT-bound dpop_jkt
+       "DPoP proof key does not match token-bound key" → 401
     
     ┌─────────────────────────────────────────────┐
-    │ The public key is bound to the session at    │
-    │ login time. A different key produces a        │
-    │ different thumbprint → mismatch → rejected.  │
+    │ The public key thumbprint is embedded in the │
+    │ JWT token (dpop_jkt claim) at login time.    │
+    │ A different key produces a different          │
+    │ thumbprint → mismatch → rejected.            │
     └─────────────────────────────────────────────┘
 
 
-  SCENARIO 4: Session Fixation
-  ───────────────────────────
+  SCENARIO 4: JWT Token Tampering (Change Roles)
+  ───────────────────────────────────────────────
   
-    Attacker plants a known session ID before the victim logs in.
+    Attacker modifies JWT claims to escalate privileges.
+    (e.g., change roles from ROLE_USER to ROLE_ADMIN)
     
-    AuthController.login() → ✗ PREVENTED
-       Step c: oldSession.invalidate()
-               newSession = request.getSession(true)
-       → Old session ID destroyed, new ID generated
-       → Attacker's known session ID is useless
+    ② JwtAuthenticationFilter → ✗ BLOCKED
+       HMAC-SHA512 signature verification fails
+       "Invalid or expired token" → 401
     
     ┌─────────────────────────────────────────────┐
-    │ Session rotation at login ensures the old    │
-    │ session ID (potentially planted by attacker) │
-    │ is completely destroyed. The new session     │
-    │ gets a cryptographically random ID.          │
+    │ Any modification to the JWT payload          │
+    │ invalidates the HMAC-SHA512 signature.       │
+    │ The server detects tampering immediately.    │
     └─────────────────────────────────────────────┘
 
 
-  SCENARIO 5: Expired/Stale DPoP Proof
-  ────────────────────────────────────
+  SCENARIO 5: Expired / Stale DPoP Proof
+  ───────────────────────────────────────
   
     Client sends a DPoP proof created 10 minutes ago.
     
@@ -697,7 +609,7 @@
 
 ---
 
-## 8. Entity-Relationship Diagram
+## 7. Entity-Relationship Diagram
 
 ```
 ┌────────────────────────────┐       ┌────────────────────┐
@@ -712,35 +624,20 @@
 │     phone_number VARCHAR(20)│   │             │
 │     address     TEXT        │   │             │
 │     enabled     BOOLEAN     │   │             │
-│     account_non_expired     │   │             │
-│     account_non_locked      │   │    ┌────────┴──────────┐
-│     credentials_non_expired │   │    │    user_roles      │
-│     created_at  TIMESTAMP   │   │    │ ────────────────── │
-│     updated_at  TIMESTAMP   │   ├──▶│ FK  user_id        │
-│     last_login  TIMESTAMP   │       │ FK  role_id ───────┘
-└────────────────────────────┘       │ PK (user_id, role_id)│
-                                      └─────────────────────┘
+│     account_non_expired     │   │    ┌────────┴──────────┐
+│     account_non_locked      │   │    │    user_roles      │
+│     credentials_non_expired │   │    │ ────────────────── │
+│     created_at  TIMESTAMP   │   ├──▶│ FK  user_id        │
+│     updated_at  TIMESTAMP   │       │ FK  role_id ───────┘
+│     last_login  TIMESTAMP   │       │ PK (user_id, role_id)│
+└────────────────────────────┘       └─────────────────────┘
 
-┌────────────────────────────────────┐    ┌────────────────────────────────┐
-│       SPRING_SESSION               │    │    SPRING_SESSION_ATTRIBUTES   │
-│ ──────────────────────────────── │    │ ──────────────────────────── │
-│ PK  PRIMARY_ID      CHAR(36)     │◄───│ FK  SESSION_PRIMARY_ID CHAR(36)│
-│ UQ  SESSION_ID      CHAR(36)     │    │     ATTRIBUTE_NAME   VARCHAR   │
-│     CREATION_TIME   BIGINT       │    │     ATTRIBUTE_BYTES  BYTEA     │
-│     LAST_ACCESSED_TIME BIGINT    │    │ PK (SESSION_PRIMARY_ID,        │
-│     MAX_INACTIVE_INTERVAL INT    │    │     ATTRIBUTE_NAME)            │
-│     EXPIRY_TIME     BIGINT       │    │                                │
-│     PRINCIPAL_NAME  VARCHAR(100) │    │ Stores:                        │
-└────────────────────────────────────┘    │ • userId, username, roles     │
-                                          │ • DPOP_PUBLIC_KEY (JWK JSON)  │
-                                          │ • DPOP_JWK_THUMBPRINT         │
-                                          │ • SPRING_SECURITY_CONTEXT     │
-                                          └────────────────────────────────┘
+No session tables needed — stateless JWT architecture!
 ```
 
 ---
 
-## 9. Technology Stack Map
+## 8. Technology Stack Map
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -749,9 +646,10 @@
 │  ┌────────────────────────────────────────────────────────────────┐ │
 │  │  Spring Boot 4.0.3                                             │ │
 │  │  ┌──────────────┐ ┌──────────────┐ ┌────────────────────────┐ │ │
-│  │  │ Spring       │ │ Spring       │ │ Spring Session JDBC    │ │ │
-│  │  │ Security 7.x │ │ Data JPA    │ │ (DB-backed sessions)   │ │ │
-│  │  └──────────────┘ └──────────────┘ └────────────────────────┘ │ │
+│  │  │ Spring       │ │ Spring       │ │ JJWT 0.12.6            │ │ │
+│  │  │ Security 7.x │ │ Data JPA    │ │ (JWT generation &      │ │ │
+│  │  │ (STATELESS)  │ └──────────────┘ │  validation, HS512)    │ │ │
+│  │  └──────────────┘                  └────────────────────────┘ │ │
 │  │  ┌──────────────┐ ┌──────────────┐ ┌────────────────────────┐ │ │
 │  │  │ Spring MVC   │ │ Spring       │ │ Spring Boot Actuator   │ │ │
 │  │  │ + Validation │ │ Boot Web    │ │ (health endpoints)     │ │ │
@@ -783,13 +681,14 @@
 │  │  • HikariCP connection pool (5-10 connections)                │ │
 │  │  • Hibernate dialect: PostgreSQLDialect                       │ │
 │  │  • DDL auto: update                                            │ │
+│  │  • Tables: users, roles, user_roles (NO session tables)       │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 10. Security Headers Response Anatomy
+## 9. Security Headers Response Anatomy
 
 ```
 HTTP/1.1 200 OK
@@ -819,19 +718,25 @@ HTTP/1.1 200 OK
 │ Expires: 0                                                                 │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-┌── Session Cookie ───────────────────────────────────────────────────────────┐
-│ Set-Cookie: JSESSIONID=<uuid>;                                             │
+┌── JWT HttpOnly Cookie ──────────────────────────────────────────────────────┐
+│ Set-Cookie: ACCESS_TOKEN=<jwt>;                                            │
 │             Path=/;                                                        │
-│             HttpOnly;          ← Not accessible via JavaScript             │
+│             HttpOnly;          ← NOT accessible via JavaScript (XSS-proof) │
 │             Secure;            ← Only sent over HTTPS                      │
-│             SameSite=Strict;   ← Not sent on cross-site requests           │
-│             Max-Age=900        ← 15 minutes                                │
+│             SameSite=Strict;   ← Never sent on cross-site requests         │
+│             Max-Age=900        ← 15 minutes (matches JWT expiry)           │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌── CSRF Cookie ──────────────────────────────────────────────────────────────┐
 │ Set-Cookie: XSRF-TOKEN=<token>;                                            │
 │             Path=/;                                                        │
 │             (HttpOnly=false)   ← Readable by JavaScript for AJAX requests  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌── Authentication Headers (sent by client) ──────────────────────────────────┐
+│   Cookie: ACCESS_TOKEN=<jwt>   (auto-attached by browser)                  │
+│   DPoP: <fresh-dpop-proof-jwt> (manually attached by client JS)            │
+│   X-XSRF-TOKEN: <csrf-token>  (for POST/PUT/DELETE requests)              │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 Content-Type: application/json

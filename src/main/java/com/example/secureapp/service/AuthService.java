@@ -73,28 +73,26 @@ public class AuthService {
 
     @Transactional
     public UserResponse login(LoginRequest loginRequest) {
+        // Use generic error message for both "user not found" and "wrong password"
+        // to prevent account enumeration attacks
         User user = userRepository.findByUsername(loginRequest.getUsername())
-            .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+            .orElseThrow(() -> new BadRequestException("Invalid credentials"));
 
-        logger.debug("Login attempt for user [{}]. Stored hash starts with: {}",
-                loginRequest.getUsername(),
-                user.getPassword() != null && user.getPassword().length() > 7
-                        ? user.getPassword().substring(0, 7) + "..."
-                        : "NULL/EMPTY");
+        logger.debug("Login attempt for user [{}]", loginRequest.getUsername());
 
         if (!passwordEncoder.matches(loginRequest.getPassword(), user.getPassword())) {
-            logger.warn("Password mismatch for user [{}]. Stored hash length: {}",
-                    loginRequest.getUsername(),
-                    user.getPassword() != null ? user.getPassword().length() : 0);
+            logger.warn("Password mismatch for user [{}]", loginRequest.getUsername());
             throw new BadRequestException("Invalid credentials");
         }
 
         if (!user.getEnabled()) {
-            throw new BadRequestException("Account is disabled");
+            // Generic message — do not reveal account status
+            throw new BadRequestException("Invalid credentials");
         }
 
         if (!user.getAccountNonLocked()) {
-            throw new BadRequestException("Account is locked");
+            // Generic message — do not reveal lock status
+            throw new BadRequestException("Invalid credentials");
         }
 
         // Update last login time

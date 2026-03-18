@@ -1,48 +1,75 @@
 ================================================================================
                     SecureApp — Project Summary
 ================================================================================
-Version:        1.0.0
+Version:        2.0.0 (Stateless JWT + HttpOnly Cookie)
 Java:           21
 Spring Boot:    4.0.3
-Last Updated:   March 12, 2026
+Last Updated:   March 16, 2026
 
 ================================================================================
   OVERVIEW
 ================================================================================
 
 SecureApp is a production-grade Spring Boot backend with enterprise security:
-  - Session-based authentication with JDBC-backed sessions (PostgreSQL)
+  - Stateless JWT-based authentication (HMAC-SHA512, JJWT 0.12.6)
+  - JWT transported in HttpOnly, Secure, SameSite=Strict cookie (XSS-proof)
+  - CSRF protection (CookieCsrfTokenRepository) — required for cookie-based transport
   - DPoP (Demonstration of Proof-of-Possession) — RFC 9449
-  - CSRF protection (CookieCsrfTokenRepository)
+  - DPoP JWK thumbprint embedded in JWT token (dpop_jkt claim)
   - Role-based access control (AuthorizationInterceptor + RolePermissionMapping)
   - Comprehensive security headers (CSP, HSTS, X-Frame-Options, etc.)
   - BCrypt password hashing (strength 12)
+  - No server-side sessions — fully stateless & horizontally scalable
 
 ================================================================================
   REQUEST FLOW
 ================================================================================
 
-  Client → DPoPAuthenticationFilter → SessionValidationFilter
-         → SecurityHeadersFilter → CSRF Filter
-         → AuthorizationInterceptor → Controller
+  Client → JwtAuthenticationFilter → DPoPAuthenticationFilter
+         → SecurityHeadersFilter → AuthorizationInterceptor → Controller
 
   Public endpoints (no auth): /auth/login, /auth/register, /auth/logout, /health
-  Protected endpoints: All others require session + DPoP proof + role check
+  Protected endpoints: All others require JWT token + DPoP proof + role check
 
 ================================================================================
-  API ENDPOINTS (Base URL: http://localhost:8080/api)
+  API ENDPOINTS (Base URL: http://localhost:8081/api)
 ================================================================================
 
   PUBLIC:
     POST  /auth/register     Create new user (ROLE_USER by default)
-    POST  /auth/login        Login + DPoP key binding (requires DPoP header)
-    POST  /auth/logout       Invalidate session
-    GET   /health            Health check
+    POST  /auth/login         Login + DPoP key binding → returns JWT token
+    POST  /auth/logout        Client discards JWT token
+    GET   /health             Health check
 
-  PROTECTED (requires JSESSIONID cookie + DPoP header):
-    GET   /auth/me           Get current user profile
-    GET   /dashboard         Dashboard (ROLE_USER, ROLE_ADMIN)
-    GET   /admin/users       Admin-only user list (ROLE_ADMIN)
+  PROTECTED (requires ACCESS_TOKEN cookie + DPoP header):
+    GET   /auth/me            Get current user profile
+    GET   /dashboard          Dashboard (ROLE_USER, ROLE_ADMIN)
+    GET   /admin/users        Admin-only user list (ROLE_ADMIN)
+
+================================================================================
+  AUTHENTICATION (Stateless JWT)
+================================================================================
+
+  Login Response:
+    {
+      "expiresIn": 900000,
+      "user": { id, username, email, roles, ... }
+    }
+    + Set-Cookie: ACCESS_TOKEN=<jwt>; HttpOnly; Secure; SameSite=Strict; Max-Age=900
+    (JWT is NOT in the response body — it's in the HttpOnly cookie)
+
+  JWT Token Claims:
+    sub       — username
+    roles     — list of role names (e.g., ROLE_USER, ROLE_ADMIN)
+    userId    — database user ID
+    dpop_jkt  — DPoP JWK thumbprint (RFC 9449 confirmation)
+    iss       — issuer ("secureapp")
+    iat       — issued at
+    exp       — expiration (15 minutes)
+
+  Protected Request Headers:
+    Cookie: ACCESS_TOKEN=<jwt> (auto-attached by browser)
+    DPoP: <fresh-dpop-proof-jwt>
 
 ================================================================================
   DPoP (Demonstration of Proof-of-Possession)
@@ -50,9 +77,9 @@ SecureApp is a production-grade Spring Boot backend with enterprise security:
 
   1. Client generates ECDSA P-256 keypair locally (WebCrypto API)
   2. At login: client sends self-signed DPoP proof JWT with public key
-  3. Server validates proof and binds public key to the session
+  3. Server validates proof and embeds JWK thumbprint in JWT (dpop_jkt claim)
   4. All subsequent requests must include a fresh DPoP proof
-  5. Server compares JWK thumbprint with session-bound thumbprint
+  5. Server compares JWK thumbprint with JWT-bound thumbprint
   6. Replay protection via Caffeine cache (jti uniqueness check)
 
   DPoP Header format: DPoP: <signed-jwt>
@@ -65,12 +92,11 @@ SecureApp is a production-grade Spring Boot backend with enterprise security:
 ================================================================================
 
   config/
-    SecurityConfig.java          Filter chain, CORS, CSRF, session management
-    SessionConfig.java           @EnableJdbcHttpSession (15-min timeout)
+    SecurityConfig.java          Filter chain, CORS, stateless session config
     WebMvcConfig.java            Registers AuthorizationInterceptor
 
   controller/
-    AuthController.java          Login (with DPoP), register, logout, /auth/me
+    AuthController.java          Login (with DPoP + JWT), register, logout, /auth/me
     DashboardController.java     /health, /dashboard, /admin/users
 
   dpop/
@@ -78,12 +104,13 @@ SecureApp is a production-grade Spring Boot backend with enterprise security:
     DPoPConstants.java               Constants (headers, claims, cache config)
     DPoPProofValidator.java          RFC 9449 proof validation logic
     DPoPReplayProtectionService.java Caffeine cache for jti replay protection
-    DPoPSessionBindingService.java   Binds public key to session at login
+    DPoPSessionBindingService.java   Validates DPoP proof at login, returns thumbprint
     DPoPValidationException.java     Custom exception for validation failures
 
   dto/
     ApiResponse.java             Standard response wrapper
     LoginRequest.java            {username, password}
+    LoginResponse.java           {accessToken, tokenType, expiresIn, user}
     SignUpRequest.java           {username, email, firstName, lastName, password, confirmPassword}
     UserResponse.java            {id, username, email, roles, ...}
 
@@ -97,8 +124,8 @@ SecureApp is a production-grade Spring Boot backend with enterprise security:
     ResourceNotFoundException.java 404 errors
 
   filter/
+    JwtAuthenticationFilter.java JWT token validation, SecurityContext setup
     SecurityHeadersFilter.java   CSP, HSTS, X-Frame-Options, etc.
-    SessionValidationFilter.java Session existence + auth validation
 
   repository/
     RoleRepository.java          JPA repository for Role
@@ -107,6 +134,7 @@ SecureApp is a production-grade Spring Boot backend with enterprise security:
   security/
     AuthorizationInterceptor.java    MVC interceptor for role-based path auth
     CustomUserDetailsService.java    Loads UserDetails from DB
+    JwtTokenService.java             JWT generation, validation, claims extraction
     RolePermissionMapping.java       Path → allowed-roles mapping
 
   service/
@@ -143,8 +171,8 @@ SecureApp is a production-grade Spring Boot backend with enterprise security:
     roles                    Role definitions
     users                    User accounts
     user_roles               User ↔ Role junction
-    SPRING_SESSION           JDBC session storage
-    SPRING_SESSION_ATTRIBUTES Session attributes (incl. DPoP keys)
+
+  Note: No session tables required (stateless JWT architecture).
 
   Initialize: psql -U postgres -d secureapp_db -f init-database.sql
 
@@ -162,6 +190,7 @@ SecureApp is a production-grade Spring Boot backend with enterprise security:
   README.md                          Detailed documentation
   ARCHITECTURE.md                    System architecture diagrams
   PROJECT_SUMMARY.txt                This file — quick reference
+  SECURITY_NOTE.md                   Security implementation report
   SecureApp-API.postman_collection.json  Postman test collection with DPoP scripts
   init-database.sql                  Database initialization script
   pom.xml                            Maven build configuration

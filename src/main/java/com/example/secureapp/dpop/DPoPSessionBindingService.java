@@ -1,23 +1,19 @@
 package com.example.secureapp.dpop;
 
 import com.nimbusds.jose.jwk.ECKey;
-import jakarta.servlet.http.HttpSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Service that binds a DPoP public key to an HTTP session at login time.
+ * Service that validates a DPoP proof at login time and returns the
+ * public key thumbprint to be embedded in the JWT access token.
  *
- * <p>Called from the login controller after successful authentication.  The
- * client's EC P-256 public key (extracted from the DPoP proof JWT header) is
- * stored in the session as two attributes:</p>
- * <ul>
- *   <li>{@link DPoPConstants#SESSION_ATTR_DPOP_PUBLIC_KEY} — serialised JWK JSON
- *       (useful for debugging / auditing)</li>
- *   <li>{@link DPoPConstants#SESSION_ATTR_DPOP_JWK_THUMBPRINT} — JWK thumbprint
- *       (used for fast comparison in the filter)</li>
- * </ul>
+ * <p>In the stateless architecture, instead of binding the DPoP key to a
+ * server-side session, the JWK thumbprint is embedded in the JWT token
+ * as the {@code dpop_jkt} claim (RFC 9449 §6). This allows the
+ * {@link DPoPAuthenticationFilter} to verify proof-of-possession on
+ * every request without any server-side state.</p>
  */
 @Service
 public class DPoPSessionBindingService {
@@ -31,25 +27,22 @@ public class DPoPSessionBindingService {
     }
 
     /**
-     * Validates the DPoP proof supplied during login and binds the client's
-     * public key to the given session.
+     * Validates the DPoP proof supplied during login and returns the JWK thumbprint
+     * to be embedded in the JWT access token.
      *
      * @param dpopProof   the compact-serialised DPoP proof JWT from the {@code DPoP} header
      * @param httpMethod  HTTP method of the login request (e.g. "POST")
      * @param requestUri  full URI of the login request
-     * @param session     the newly-created HTTP session
+     * @return the JWK thumbprint of the client's public key
      * @throws DPoPValidationException if the proof is invalid
      */
-    public void validateAndBindKey(String dpopProof, String httpMethod, String requestUri, HttpSession session) {
+    public String validateAndGetThumbprint(String dpopProof, String httpMethod, String requestUri) {
         DPoPProofValidator.DPoPValidationResult result = proofValidator.validate(dpopProof, httpMethod, requestUri);
 
         ECKey publicKey = result.publicKey();
         String thumbprint = result.jwkThumbprint();
 
-        // Store public key JSON and thumbprint in the session (persisted via Spring Session JDBC)
-        session.setAttribute(DPoPConstants.SESSION_ATTR_DPOP_PUBLIC_KEY, publicKey.toJSONString());
-        session.setAttribute(DPoPConstants.SESSION_ATTR_DPOP_JWK_THUMBPRINT, thumbprint);
-
-        logger.info("DPoP public key bound to session [{}]. JWK thumbprint: {}", session.getId(), thumbprint);
+        logger.info("DPoP proof validated at login. JWK thumbprint: {}", thumbprint);
+        return thumbprint;
     }
 }

@@ -10,17 +10,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * Web MVC configuration that registers the {@link AuthorizationInterceptor}
  * into the Spring MVC interceptor chain.
  *
- * <p>Request flow:
- * Browser → NGINX → Spring Security Filter Chain → SessionValidationFilter
- * → <b>AuthorizationInterceptor (registered here)</b> → Controller
- *
- * <p>Excluded paths (public endpoints) are not intercepted:
- * <ul>
- *   <li>/auth/login</li>
- *   <li>/auth/register</li>
- *   <li>/auth/logout</li>
- *   <li>/health</li>
- * </ul>
+ * <p>Request flow (stateless):
+ * Browser → Spring Security Filter Chain → JwtAuthenticationFilter
+ * → DPoPAuthenticationFilter → <b>AuthorizationInterceptor (registered here)</b> → Controller
  */
 @Configuration
 @RequiredArgsConstructor
@@ -31,9 +23,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(authorizationInterceptor)
-                // Intercept all paths
                 .addPathPatterns("/**")
-                // Exclude public endpoints from authorization interception
                 .excludePathPatterns(
                         "/auth/login",
                         "/auth/register",

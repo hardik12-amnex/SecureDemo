@@ -1,7 +1,5 @@
 package com.example.secureapp.util;
 
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpSession;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -14,10 +12,14 @@ import java.util.stream.Collectors;
 
 /**
  * Thread-safe utility class for retrieving authenticated user information
- * from the Spring Security context and HTTP session.
+ * from the Spring Security context.
+ *
+ * <p>In the stateless JWT architecture, all user information is extracted
+ * from the JWT token and placed in the SecurityContext by the
+ * {@code JwtAuthenticationFilter}. No server-side session is used.</p>
  *
  * <p>All methods are static and stateless — no instance fields store
- * request-specific data, ensuring complete thread safety.
+ * request-specific data, ensuring complete thread safety.</p>
  */
 public final class SecurityUtils {
 
@@ -48,21 +50,6 @@ public final class SecurityUtils {
     }
 
     /**
-     * Retrieves the username from the HTTP session.
-     *
-     * @param request the current HTTP request
-     * @return an Optional containing the username, or empty if session/attribute is missing
-     */
-    public static Optional<String> getCurrentUserFromSession(HttpServletRequest request) {
-        HttpSession session = request.getSession(false);
-        if (session == null) {
-            return Optional.empty();
-        }
-        Object username = session.getAttribute("username");
-        return username != null ? Optional.of(username.toString()) : Optional.empty();
-    }
-
-    /**
      * Retrieves the set of role names for the currently authenticated user.
      *
      * @return a set of role names (e.g., "ROLE_ADMIN", "ROLE_USER"), or empty set
@@ -76,25 +63,6 @@ public final class SecurityUtils {
         return authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
                 .collect(Collectors.toSet());
-    }
-
-    /**
-     * Retrieves the roles stored in the HTTP session.
-     *
-     * @param request the current HTTP request
-     * @return a set of role names from session, or empty set
-     */
-    @SuppressWarnings("unchecked")
-    public static Set<String> getRolesFromSession(HttpServletRequest request) {
-        HttpSession session = request.getSession(false);
-        if (session == null) {
-            return Collections.emptySet();
-        }
-        Object roles = session.getAttribute("roles");
-        if (roles instanceof Set<?>) {
-            return (Set<String>) roles;
-        }
-        return Collections.emptySet();
     }
 
     /**
